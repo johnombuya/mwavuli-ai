@@ -1,0 +1,23 @@
+{
+  "name": "mwavuli",
+  "version": "1.0.0",
+  "description": "Mwavuli Content Verification & Analytics Platform",
+  "scripts": {
+    "dev": "docker-compose up",
+    "dev:backend": "cd backend && uvicorn app.main:app --reload",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "docker-compose build",
+    "start": "docker-compose up -d",
+    "stop": "docker-compose down",
+    "logs": "docker-compose logs -f",
+    "test": "cd backend && bash scripts/test_api.sh"
+  },
+  "keywords": [
+    "content-verification",
+    "analytics",
+    "fastapi",
+    "nextjs"
+  ],
+  "author": "",
+  "license": "ISC"
+}

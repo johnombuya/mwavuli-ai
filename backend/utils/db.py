@@ -8,8 +8,9 @@ the detection models.
 
 import os
 import hashlib
+import re
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict
 
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -86,6 +87,182 @@ def _anonymize_sender(sender_id: str) -> str:
     return hashlib.sha256(sender_id.encode()).hexdigest()[:16]
 
 
+# Kenyan counties mapped to regions
+COUNTY_TO_REGION = {
+    "Nairobi": "Nairobi",
+    "Mombasa": "Coast",
+    "Kisumu": "Nyanza",
+    "Nakuru": "Rift Valley",
+    "Eldoret": "Rift Valley",
+    "Thika": "Central",
+    "Malindi": "Coast",
+    "Kitale": "Rift Valley",
+    "Garissa": "North Eastern",
+    "Kakamega": "Western",
+    "Meru": "Eastern",
+    "Nyeri": "Central",
+    "Machakos": "Eastern",
+    "Embu": "Eastern",
+    "Kiambu": "Central",
+    "Muranga": "Central",
+    "Narok": "Rift Valley",
+    "Bungoma": "Western",
+    "Busia": "Western",
+    "Homa Bay": "Nyanza",
+    "Kisii": "Nyanza",
+    "Migori": "Nyanza",
+    "Siaya": "Nyanza",
+    "Vihiga": "Western",
+    "Bomet": "Rift Valley",
+    "Kericho": "Rift Valley",
+    "Laikipia": "Rift Valley",
+    "Nandi": "Rift Valley",
+    "Trans Nzoia": "Rift Valley",
+    "Uasin Gishu": "Rift Valley",
+    "West Pokot": "Rift Valley",
+    "Baringo": "Rift Valley",
+    "Elgeyo Marakwet": "Rift Valley",
+    "Samburu": "Rift Valley",
+    "Turkana": "Rift Valley",
+    "Nyandarua": "Central",
+    "Kirinyaga": "Central",
+    "Nyamira": "Nyanza",
+    "Kajiado": "Rift Valley",
+    "Makueni": "Eastern",
+    "Taita Taveta": "Coast",
+    "Kwale": "Coast",
+    "Kilifi": "Coast",
+    "Lamu": "Coast",
+    "Tana River": "Coast",
+    "Wajir": "North Eastern",
+    "Mandera": "North Eastern",
+    "Marsabit": "Eastern",
+    "Isiolo": "Eastern",
+    "Meru": "Eastern",
+    "Tharaka Nithi": "Eastern",
+    "Kitui": "Eastern",
+    "Machakos": "Eastern",
+    "Makueni": "Eastern",
+}
+
+# Urban counties (major cities/towns)
+URBAN_COUNTIES = {
+    "Nairobi", "Mombasa", "Kisumu", "Nakuru", "Eldoret", "Thika",
+    "Malindi", "Kitale", "Garissa", "Kakamega", "Meru", "Nyeri",
+    "Machakos", "Embu", "Kiambu"
+}
+
+
+def _get_temporal_fields(timestamp: datetime) -> Dict[str, any]:
+    """
+    Extract temporal fields from timestamp.
+    
+    Args:
+        timestamp: The datetime object
+        
+    Returns:
+        Dictionary with hour_of_day, day_of_week, is_weekend
+    """
+    return {
+        "hour_of_day": timestamp.hour,
+        "day_of_week": timestamp.strftime("%A"),
+        "is_weekend": timestamp.weekday() >= 5  # Saturday = 5, Sunday = 6
+    }
+
+
+def _get_content_analysis(text: str) -> Dict[str, any]:
+    """
+    Analyze text content for metadata.
+    
+    Args:
+        text: The text to analyze
+        
+    Returns:
+        Dictionary with text_length, word_count, has_urls, has_mentions
+    """
+    # URL pattern
+    url_pattern = re.compile(
+        r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+    )
+    
+    # Mention pattern (@username or #hashtag)
+    mention_pattern = re.compile(r'[@#]\w+')
+    
+    words = text.split()
+    
+    return {
+        "text_length": len(text),
+        "word_count": len(words),
+        "has_urls": bool(url_pattern.search(text)),
+        "has_mentions": bool(mention_pattern.search(text))
+    }
+
+
+def _get_detection_method(data: dict) -> Dict[str, any]:
+    """
+    Determine detection method and confidence score.
+    
+    Args:
+        data: Report data dictionary
+        
+    Returns:
+        Dictionary with detection_method and confidence_score
+    """
+    matched_keyword = data.get("matched_keyword")
+    gemini_flag = data.get("gemini_context_flag", False)
+    scores = data.get("scores", {})
+    
+    # Determine detection method
+    if matched_keyword:
+        detection_method = "lexicon"
+        confidence_score = 1.0  # High confidence for lexicon matches
+    elif gemini_flag:
+        detection_method = "gemini"
+        confidence_score = 0.9  # High confidence for Gemini detection
+    elif scores and isinstance(scores, dict) and "toxicity" in scores:
+        detection_method = "detoxify"
+        # Use max toxicity score as confidence
+        score_values = [v for k, v in scores.items() if k not in ["error", "fallback"]]
+        confidence_score = max(score_values) if score_values else 0.5
+    else:
+        detection_method = "unknown"
+        confidence_score = 0.0
+    
+    # If multiple methods detected, mark as combined
+    if matched_keyword and (gemini_flag or (scores and "toxicity" in scores)):
+        detection_method = "combined"
+        confidence_score = min(1.0, confidence_score + 0.1)
+    
+    return {
+        "detection_method": detection_method,
+        "confidence_score": confidence_score
+    }
+
+
+def _get_geographic_fields(county: str) -> Dict[str, any]:
+    """
+    Derive geographic metadata from county.
+    
+    Args:
+        county: County name
+        
+    Returns:
+        Dictionary with region and is_urban
+    """
+    county_normalized = county.strip()
+    
+    # Get region
+    region = COUNTY_TO_REGION.get(county_normalized, "Unknown")
+    
+    # Check if urban
+    is_urban = county_normalized in URBAN_COUNTIES
+    
+    return {
+        "region": region,
+        "is_urban": is_urban
+    }
+
+
 def save_report(data: dict) -> Optional[str]:
     """
     Save a verification report to Firestore.
@@ -113,15 +290,40 @@ def save_report(data: dict) -> Optional[str]:
         return None
     
     try:
+        # Get timestamp
+        timestamp = datetime.utcnow()
+        
         # Build the anonymized report document
         report = {
             "text": data.get("text", ""),
             "risk_level": data.get("risk_level", "UNKNOWN"),
             "language": data.get("language", "unknown"),
             "county": data.get("county", "unknown"),
-            "timestamp": datetime.utcnow(),
+            "timestamp": timestamp,
             "sender_hash": _anonymize_sender(data.get("sender_id", "anonymous")),
         }
+        
+        # Add temporal fields
+        temporal_fields = _get_temporal_fields(timestamp)
+        report.update(temporal_fields)
+        
+        # Add content analysis fields
+        text = data.get("text", "")
+        content_fields = _get_content_analysis(text)
+        report.update(content_fields)
+        
+        # Add detection metadata
+        detection_fields = _get_detection_method(data)
+        report.update(detection_fields)
+        
+        # Add geographic fields
+        county = data.get("county", "unknown")
+        if county != "unknown":
+            geo_fields = _get_geographic_fields(county)
+            report.update(geo_fields)
+        else:
+            report["region"] = "Unknown"
+            report["is_urban"] = False
         
         # Add optional fields if present
         if "scores" in data:
@@ -206,3 +408,13 @@ def get_recent_reports(limit: int = 10) -> list:
         print(f"Error retrieving recent reports: {e}")
         return []
 
+
+def is_database_connected() -> bool:
+    """
+    Check if the database is connected and available.
+    
+    Returns:
+        True if database is connected, False otherwise
+    """
+    db = _get_db()
+    return db is not None

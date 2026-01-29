@@ -1,336 +1,353 @@
-# Project Mwavuli - Content Verification API
+# Project Mwavuli - Content Verification & Analytics Platform
 
-A FastAPI-based content verification system designed for detecting harmful information in the Kenyan political context. This system combines lexicon-based keyword detection, AI-powered toxicity analysis, and contextual understanding to identify potentially harmful content during election periods.
+A full-stack content verification system designed for detecting harmful information in the Kenyan political context. This system combines lexicon-based keyword detection, AI-powered toxicity analysis, and contextual understanding to identify potentially harmful content during election periods.
+
+## Architecture
+
+```
+┌─────────────┐
+│   Browser   │
+└──────┬──────┘
+       │
+┌──────▼─────────────────────────────────────┐
+│  Next.js Frontend (Port 3000)              │
+│  - Analytics Dashboard                     │
+│  - Real-time Updates (2-min polling)      │
+│  - API Rewrites → Backend                  │
+└──────┬─────────────────────────────────────┘
+       │
+┌──────▼─────────────────────────────────────┐
+│  FastAPI Backend (Port 8000)               │
+│  - Content Verification                    │
+│  - Analytics API                           │
+│  - Data Export                             │
+└──────┬─────────────────────────────────────┘
+       │
+┌──────▼──────┐
+│  Firestore  │
+└─────────────┘
+```
 
 ## Features
 
+### Backend
 - **Lexicon-Based Detection**: Immediate flagging of high-risk Kenyan political keywords (e.g., "madoadoa", "kwekwe")
 - **AI Toxicity Analysis**: Multilingual toxicity detection using Detoxify
 - **Context-Aware Analysis**: Google Gemini integration for detecting subtle political incitement
 - **Multi-Language Support**: Responses in English, Swahili, and Sheng
 - **Firebase Integration**: Anonymized logging of reports for pattern analysis
-- **WhatsApp Ready**: Designed for integration with n8n/Twilio workflows
+- **Analytics API**: Comprehensive analytics endpoints for data analysis
+- **Data Export**: CSV/JSON export for external tools
 
-## Architecture
+### Frontend
+- **Real-time Dashboard**: Live analytics with 2-minute auto-refresh
+- **Interactive Charts**: Risk distribution, keyword trends, toxicity trends, hourly patterns
+- **County Analysis**: Geographic heatmap of risk levels by county
+- **Date Range Filtering**: Filter analytics by date range
+- **Responsive Design**: Works on desktop and mobile devices
 
+## Quick Start with Docker Compose
+
+The easiest way to run the entire application:
+
+```bash
+# Start both backend and frontend
+docker-compose up
+
+# Or run in detached mode
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
 ```
-WhatsApp → n8n/Twilio → FastAPI → MwavuliAnalyzer → Detoxify + Gemini → Firebase
-```
 
-## Prerequisites
+The application will be available at:
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
 
-- Python 3.10+ (tested with Python 3.14)
+## Manual Setup
+
+### Prerequisites
+
+- Python 3.10+ (tested with Python 3.11+)
+- Node.js 20+ and npm
 - Firebase project with Firestore enabled
 - Google Gemini API key
-- (Optional) Twilio account for WhatsApp integration
 
-## Installation
+### Backend Setup
 
-### 1. Clone the Repository
-
-```bash
-git clone <repository-url>
-cd niru_mwavuli
-```
-
-### 2. Create Virtual Environment
-
-```bash
-# Windows
-python -m venv .venv
-.venv\Scripts\activate
-
-# Linux/Mac
-python -m venv .venv
-source .venv/bin/activate
-```
-
-### 3. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-**Note**: The first time Detoxify runs, it will download the multilingual model (~500MB). This happens automatically on the first API call.
-
-### 4. Set Up Firebase
-
-1. Go to [Firebase Console](https://console.firebase.google.com/)
-2. Create a new project or select existing project
-3. Enable **Firestore Database**:
-   - Go to Firestore Database
-   - Click "Create database"
-   - Choose "Start in production mode" (you can add security rules later)
-   - Select your preferred region
-   - **Important**: If you create a custom database (not default), note the database ID
-4. Create a Service Account:
-   - Go to **Project Settings** → **Service Accounts**
-   - Click **Generate new private key**
-   - Download the JSON file
-   - Save it as `firebase-service-account.json` in the project root
-
-### 5. Configure Environment Variables
-
-1. Copy the environment template:
+1. **Navigate to backend directory**:
    ```bash
-   # Windows PowerShell
-   Copy-Item env.template .env
+   cd backend
+   ```
+
+2. **Create virtual environment**:
+   ```bash
+   # Windows
+   python -m venv .venv
+   .venv\Scripts\activate
    
    # Linux/Mac
-   cp env.template .env
+   python -m venv .venv
+   source .venv/bin/activate
    ```
 
-2. Edit `.env` and fill in your values:
-   ```env
-   # Firebase Configuration
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Set up Firebase**:
+   - Go to [Firebase Console](https://console.firebase.google.com/)
+   - Create a new project or select existing project
+   - Enable **Firestore Database**
+   - Create a Service Account and download JSON
+   - Save it as `firebase-service-account.json` in `backend/` directory
+
+5. **Configure environment variables**:
+   ```bash
+   # Copy template
+   cp .env.example .env
+   
+   # Edit .env and fill in:
    FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json
-   FIREBASE_DATABASE_ID=mwavuli-nira-db  # Leave empty for default database
-   
-   # Google Gemini API Key
-   # Get from: https://makersuite.google.com/app/apikey
+   FIREBASE_DATABASE_ID=mwavuli-nira-db  # Leave empty for default
    GEMINI_API_KEY=your_gemini_api_key_here
-   
-   # Twilio Configuration (optional, for WhatsApp integration)
-   TWILIO_AUTH_TOKEN=your_twilio_auth_token_here
    ```
 
-### 6. Clear Detoxify Cache (if needed)
+6. **Run backend**:
+   ```bash
+   uvicorn app.main:app --reload
+   ```
 
-If you encounter model loading errors, clear the corrupted cache:
+### Frontend Setup
 
-```bash
-# Windows PowerShell
-Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\*" -ErrorAction SilentlyContinue
+1. **Navigate to frontend directory**:
+   ```bash
+   cd frontend
+   ```
 
-# Linux/Mac
-rm -rf ~/.cache/torch/hub/*
-```
+2. **Install dependencies**:
+   ```bash
+   npm install
+   ```
 
-## Running the Application
+3. **Configure environment**:
+   ```bash
+   # Copy template
+   cp .env.local.example .env.local
+   
+   # Edit .env.local:
+   BACKEND_URL=http://localhost:8000
+   NEXT_PUBLIC_API_URL=http://localhost:8000
+   ```
 
-### Development Mode (with auto-reload)
-
-```bash
-uvicorn main:app --reload
-```
-
-The API will be available at `http://localhost:8000`
-
-### Production Mode
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
-### Using Docker (Optional)
-
-```bash
-docker build -t mwavuli-api .
-docker run -p 8000:8000 --env-file .env mwavuli-api
-```
-
-## API Endpoints
-
-### Health Check
-
-```bash
-GET /health
-```
-
-**Response:**
-```json
-{
-  "status": "healthy",
-  "timestamp": "2024-01-01T00:00:00",
-  "version": "1.0.0",
-  "model_loaded": true
-}
-```
-
-### Verify Text
-
-```bash
-POST /api/v1/verify/text
-Content-Type: application/json
-
-{
-  "text": "Your text to analyze",
-  "sender_id": "unique_sender_id",
-  "county": "Nairobi"  // Optional
-}
-```
-
-**Response:**
-```json
-{
-  "risk_level": "HIGH",
-  "messages": {
-    "english": "Warning: This message contains harmful content...",
-    "swahili": "Onyo: Ujumbe huu una maudhui hatari...",
-    "sheng": "Heads up: Message iko na vitu mbaya..."
-  },
-  "report_id": "abc123",
-  "prebunking_tip": "For official election results, always visit iebc.or.ke",
-  "scores": {
-    "toxicity": 0.85,
-    "severe_toxicity": 0.12
-  },
-  "matched_keyword": "madoadoa"
-}
-```
-
-### Verify Media (Placeholder)
-
-```bash
-POST /api/v1/verify/media
-Content-Type: application/json
-
-{
-  "media_url": "https://example.com/video.mp4",
-  "media_type": "video",
-  "sender_id": "unique_sender_id",
-  "county": "Nairobi"  // Optional
-}
-```
-
-## Testing
-
-### Using the Test Script
-
-```bash
-# Windows (Git Bash)
-bash test_api.sh
-
-# Linux/Mac
-chmod +x test_api.sh
-./test_api.sh
-```
-
-### Manual Testing with cURL
-
-```bash
-# Test safe text
-curl -X POST http://localhost:8000/api/v1/verify/text \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Hello, how are you?", "sender_id": "test123"}'
-
-# Test high-risk text
-curl -X POST http://localhost:8000/api/v1/verify/text \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Those madoadoa must leave", "sender_id": "test456", "county": "Nairobi"}'
-```
-
-### Using the Interactive API Docs
-
-Visit `http://localhost:8000/docs` for Swagger UI documentation with interactive testing.
-
-## Integration with n8n
-
-### Expected Request Format
-
-```json
-{
-  "text": "Message content from WhatsApp",
-  "sender_id": "whatsapp:+254712345678",
-  "county": "Nairobi"
-}
-```
-
-### Expected Response Format
-
-```json
-{
-  "risk_level": "HIGH|MEDIUM|LOW",
-  "messages": {
-    "english": "...",
-    "swahili": "...",
-    "sheng": "..."
-  },
-  "report_id": "firestore_document_id",
-  "prebunking_tip": "For official election results, always visit iebc.or.ke"
-}
-```
-
-### n8n Workflow Example
-
-1. **HTTP Request Node** → POST to `/api/v1/verify/text`
-2. **IF Node** → Check `risk_level === "HIGH"`
-3. **Twilio Node** → Send WhatsApp message using `messages.swahili` or `messages.sheng`
-4. **Always include** `prebunking_tip` in responses
+4. **Run frontend**:
+   ```bash
+   npm run dev
+   ```
 
 ## Project Structure
 
 ```
 niru_mwavuli/
-├── main.py                      # FastAPI application
-├── models/
-│   └── text_analyzer.py         # MwavuliAnalyzer class
-├── utils/
-│   ├── db.py                    # Firebase Firestore utility
-│   └── lexicon.py               # Kenya-specific keywords
-├── requirements.txt             # Python dependencies
-├── .env                         # Environment variables (not in git)
-├── env.template                 # Environment template
-├── firebase-service-account.example.json  # Firebase template
-├── test_api.sh                  # Test script
-└── README.md                    # This file
+├── backend/                    # FastAPI backend
+│   ├── app/
+│   │   ├── main.py            # FastAPI application
+│   │   └── __init__.py
+│   ├── models/
+│   │   └── text_analyzer.py   # MwavuliAnalyzer class
+│   ├── utils/
+│   │   ├── db.py              # Firebase Firestore utility
+│   │   ├── lexicon.py         # Kenya-specific keywords
+│   │   ├── analytics.py       # Analytics functions
+│   │   └── export.py          # Data export utilities
+│   ├── docs/                  # Backend documentation
+│   ├── scripts/               # Test scripts
+│   ├── requirements.txt       # Python dependencies
+│   ├── Dockerfile            # Backend Docker image
+│   └── .env                  # Backend environment variables
+│
+├── frontend/                   # Next.js frontend
+│   ├── src/
+│   │   ├── app/              # Next.js App Router
+│   │   │   ├── layout.tsx    # Root layout with React Query
+│   │   │   ├── page.tsx      # Dashboard home
+│   │   │   └── globals.css   # Global styles
+│   │   ├── components/       # React components
+│   │   │   ├── dashboard/    # Dashboard components
+│   │   │   ├── charts/       # Chart components
+│   │   │   └── ui/           # UI components
+│   │   ├── lib/              # Utilities
+│   │   │   ├── api.ts        # API client
+│   │   │   └── utils.ts      # Helper functions
+│   │   └── types/            # TypeScript types
+│   │       └── api.ts
+│   ├── package.json          # Node dependencies
+│   ├── next.config.js        # Next.js config with rewrites
+│   ├── Dockerfile           # Frontend Docker image
+│   └── .env.local           # Frontend environment variables
+│
+├── docker-compose.yml        # Docker Compose configuration
+└── README.md                 # This file
 ```
 
-## Risk Levels
+## API Endpoints
 
-- **HIGH**: Contains high-risk keywords or toxicity score > 0.7
-- **MEDIUM**: Toxicity score between 0.4-0.7
-- **LOW**: Toxicity score < 0.4
+### Verification
+
+- `POST /api/v1/verify/text` - Verify text content
+- `POST /api/v1/verify/media` - Verify media content (placeholder)
+
+### Analytics
+
+- `GET /api/v1/analytics/summary` - Overall statistics
+- `GET /api/v1/analytics/risk-distribution` - Risk level breakdown
+- `GET /api/v1/analytics/county-analysis` - County-level analysis
+- `GET /api/v1/analytics/keyword-trends` - Top keywords
+- `GET /api/v1/analytics/toxicity-trends` - Toxicity over time
+- `GET /api/v1/analytics/hourly-patterns` - Hour-based patterns
+- `GET /api/v1/analytics/daily-patterns` - Day-of-week patterns
+- `GET /api/v1/analytics/detection-comparison` - Lexicon vs Gemini
+- `GET /api/v1/analytics/geographic-heatmap` - County risk map
+
+### Export
+
+- `GET /api/v1/export/reports` - Export raw reports (CSV/JSON)
+- `GET /api/v1/export/analytics` - Export aggregated analytics
+- `GET /api/v1/export/looker-studio` - Optimized export for Looker Studio
+
+### System
+
+- `GET /health` - Basic health check
+- `GET /api/v1/health` - Enhanced health check with service status
+- `GET /docs` - Interactive API documentation
+
+## Development
+
+### Running Services Separately
+
+**Backend**:
+```bash
+cd backend
+uvicorn app.main:app --reload
+```
+
+**Frontend**:
+```bash
+cd frontend
+npm run dev
+```
+
+### Testing
+
+**Backend API Tests**:
+```bash
+cd backend
+bash scripts/test_api.sh
+bash scripts/test_analytics.sh
+```
+
+**Frontend**:
+```bash
+cd frontend
+npm run lint
+```
+
+## Production Deployment
+
+### Docker Compose (Recommended)
+
+1. **Build images**:
+   ```bash
+   docker-compose build
+   ```
+
+2. **Run in production mode**:
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Update frontend Dockerfile** for production:
+   ```dockerfile
+   # In frontend/Dockerfile, change CMD to:
+   RUN npm run build
+   CMD ["npm", "start"]
+   ```
+
+### Environment Variables
+
+**Backend** (`backend/.env`):
+```env
+FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json
+FIREBASE_DATABASE_ID=mwavuli-nira-db
+GEMINI_API_KEY=your_key_here
+FRONTEND_URL=https://your-frontend-domain.com
+```
+
+**Frontend** (`frontend/.env.local`):
+```env
+BACKEND_URL=http://backend:8000  # Docker service name
+NEXT_PUBLIC_API_URL=https://api.your-domain.com  # Public API URL
+```
 
 ## Troubleshooting
 
-### Detoxify Model Loading Error
+### Backend Issues
 
-**Error**: `RuntimeError: PytorchStreamReader failed reading zip archive`
-
-**Solution**: Clear the corrupted cache (see Installation step 6)
-
-### Firebase Database Error
-
-**Error**: `404 The database (default) does not exist`
-
-**Solution**: 
-1. Ensure Firestore is enabled in Firebase Console
-2. If using a custom database, set `FIREBASE_DATABASE_ID` in `.env`
-3. Visit the URL provided in the error to create the database
-
-### Gemini API Error
-
-**Error**: `Warning: Failed to initialize Gemini`
-
-**Solution**:
-1. Verify `GEMINI_API_KEY` is set correctly in `.env`
-2. Check API key is valid at [Google AI Studio](https://makersuite.google.com/app/apikey)
-3. Ensure you have quota available
-
-### Port Already in Use
-
-**Error**: `Address already in use`
-
-**Solution**: Use a different port:
+**Model Loading Error**: Clear Detoxify cache:
 ```bash
-uvicorn main:app --port 8001
+# Windows
+Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\*"
+
+# Linux/Mac
+rm -rf ~/.cache/torch/hub/*
 ```
+
+**Firebase Database Error**: Ensure `FIREBASE_DATABASE_ID` matches your Firestore database ID.
+
+### Frontend Issues
+
+**API Connection Error**: 
+- Check `BACKEND_URL` in `frontend/.env.local`
+- Verify backend is running on port 8000
+- Check browser console for CORS errors
+
+**Build Errors**:
+```bash
+cd frontend
+rm -rf node_modules .next
+npm install
+npm run build
+```
+
+### Docker Issues
+
+**Port Conflicts**: Edit `docker-compose.yml` to change ports:
+```yaml
+ports:
+  - "8001:8000"  # Backend on 8001
+  - "3001:3000"  # Frontend on 3001
+```
+
+**Volume Mount Issues**: Ensure file permissions are correct.
 
 ## Security Notes
 
-- **Never commit** `.env` or `firebase-service-account.json` to git
+- **Never commit** `.env`, `.env.local`, or `firebase-service-account.json` to git
 - Rotate Firebase credentials if accidentally exposed
 - Keep API keys secure and rotate regularly
 - Use environment variables for all sensitive data in production
+- Configure CORS appropriately for production (update `ALLOWED_ORIGINS` in `backend/app/main.py`)
 
-## Contributing
+## Documentation
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+- [Analytics API Documentation](backend/docs/ANALYTICS.md)
+- [Looker Studio Setup Guide](backend/docs/LOOKER_STUDIO_SETUP.md)
 
 ## License
 
@@ -348,4 +365,5 @@ For issues and questions:
 - Google Gemini for translation and context analysis
 - Firebase for data storage
 - FastAPI for the web framework
-
+- Next.js for the frontend framework
+- Recharts for data visualization
