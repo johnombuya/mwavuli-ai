@@ -136,6 +136,43 @@ curl -X POST http://localhost:8000/api/v1/verify/text \
   -d '{"text": "Those madoadoa must leave", "sender_id": "test456", "county": "Nairobi"}'
 ```
 
+## Seed dummy data
+
+To populate Firestore with dummy reports for testing the analytics dashboard:
+
+1. **Environment:** Ensure `backend/.env` has `FIREBASE_SERVICE_ACCOUNT_PATH` (path to your Firebase service account JSON). Optionally set `FIREBASE_DATABASE_ID` if using a non-default Firestore database.
+
+2. **Activate venv** (from `backend/`):
+   ```bash
+   .\.venv\Scripts\Activate.ps1   # Windows PowerShell
+   # or: source .venv/bin/activate  # Linux/macOS
+   ```
+
+3. **Dry run** (generate reports without writing to Firestore):
+   ```bash
+   python scripts/seed_dummy_reports.py --dry-run
+   ```
+
+4. **Seed Firestore** (default: 200 reports, last 30 days, mixed risk levels):
+   ```bash
+   python scripts/seed_dummy_reports.py
+   ```
+
+5. **Options:**
+   - `--preset minimal|default|large` — 50, 200, or 1000 reports (default: `default`).
+   - `--count N` — Override count for the random generator.
+   - `--generator NAME` — Use specific generators (e.g. `random`, `election_spike`, `fixed_minimal`). Can be repeated.
+   - `--dry-run` — Do not write to Firestore.
+
+   Examples:
+   ```bash
+   python scripts/seed_dummy_reports.py --preset minimal
+   python scripts/seed_dummy_reports.py --count 500
+   python scripts/seed_dummy_reports.py --generator fixed_minimal --generator election_spike --dry-run
+   ```
+
+6. **Adding more dummy data later:** Edit `scripts/seed_dummy_reports.py`. Define a function that returns a list of report dicts (use `build_report(...)` for the correct shape), then register it in `REPORT_GENERATORS`. Run with `--generator your_name` or call it from `main()`.
+
 ## Project structure
 
 ```
@@ -150,6 +187,7 @@ backend/
 │   ├── export.py        # CSV/JSON export
 │   └── lexicon.py       # Kenya-specific keywords
 ├── scripts/
+│   ├── seed_dummy_reports.py   # Seed Firestore with dummy reports for analytics testing
 │   ├── test_api.sh
 │   └── test_analytics.sh
 ├── docs/
