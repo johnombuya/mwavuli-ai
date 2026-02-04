@@ -321,6 +321,8 @@ async def get_summary_stats(
     
     Returns total reports, risk distribution, average toxicity, top keywords, and top counties.
     """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
     try:
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
@@ -359,6 +361,8 @@ async def get_risk_distribution(
     
     Returns count of reports by risk level (HIGH, MEDIUM, LOW, UNKNOWN).
     """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
     try:
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
@@ -396,6 +400,8 @@ async def get_county_analysis(
     
     Returns county-level risk breakdown with percentages.
     """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
     try:
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
@@ -425,6 +431,8 @@ async def get_keyword_trends(
     
     Returns top keywords by frequency of detection.
     """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
     try:
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
@@ -454,6 +462,8 @@ async def get_toxicity_trends(
     
     Returns daily average toxicity scores for trend analysis.
     """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
     try:
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
@@ -482,6 +492,8 @@ async def get_hourly_patterns(
     
     Returns risk distribution by hour (0-23).
     """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
     try:
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
@@ -510,6 +522,8 @@ async def get_daily_patterns(
     
     Returns risk distribution by day (Monday-Sunday).
     """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
     try:
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
@@ -538,6 +552,8 @@ async def get_detection_comparison(
     
     Returns statistics on detection method effectiveness.
     """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
     try:
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
@@ -566,6 +582,8 @@ async def get_geographic_heatmap(
     
     Returns county-level risk scores and statistics.
     """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
     try:
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None

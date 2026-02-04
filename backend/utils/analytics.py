@@ -17,8 +17,11 @@ def _get_reports_collection():
     """Get reference to the reports collection."""
     db = _get_db()
     if db is None:
+        print("[analytics] DB is None - Firestore not connected")
         return None
-    return db.collection("artifacts").document("mwavuli").collection("public").document("data").collection("reports")
+    ref = db.collection("artifacts").document("mwavuli").collection("public").document("data").collection("reports")
+    print("[analytics] Reports collection ref obtained (DB connected)")
+    return ref
 
 
 def _build_date_filter(start_date: Optional[datetime] = None, 
@@ -460,12 +463,14 @@ def get_summary_stats(start_date: Optional[datetime] = None,
     """
     query_ref, _ = _build_date_filter(start_date, end_date)
     if query_ref is None:
+        print("[analytics] get_summary_stats: query_ref is None, returning zeros")
         return {
             "total_reports": 0,
             "risk_distribution": {},
             "avg_toxicity": 0,
             "top_keywords": [],
-            "top_counties": []
+            "top_counties": [],
+            "date_range": {"start": None, "end": None},
         }
     
     try:
@@ -476,6 +481,8 @@ def get_summary_stats(start_date: Optional[datetime] = None,
         county_counter = Counter()
         
         for doc in query_ref.stream():
+            if total == 0:
+                print(f"[analytics] get_summary_stats: first report doc id = {doc.id}")
             data = doc.to_dict()
             total += 1
             
@@ -500,6 +507,7 @@ def get_summary_stats(start_date: Optional[datetime] = None,
             if county != "unknown":
                 county_counter[county] += 1
         
+        print(f"[analytics] get_summary_stats: total reports in query = {total}")
         avg_toxicity = sum(toxicity_scores) / len(toxicity_scores) if toxicity_scores else 0
         
         return {
@@ -526,7 +534,8 @@ def get_summary_stats(start_date: Optional[datetime] = None,
             "risk_distribution": {},
             "avg_toxicity": 0,
             "top_keywords": [],
-            "top_counties": []
+            "top_counties": [],
+            "date_range": {"start": None, "end": None},
         }
 
 

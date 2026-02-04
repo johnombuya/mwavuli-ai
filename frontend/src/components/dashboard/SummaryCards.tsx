@@ -47,19 +47,19 @@ export function SummaryCards({ dateRange }: SummaryCardsProps) {
     },
     {
       title: 'High Risk',
-      value: formatNumber(data.risk_distribution.HIGH),
+      value: formatNumber(data.risk_distribution?.HIGH ?? 0),
       color: 'text-red-600',
       bgColor: 'bg-red-50',
     },
     {
       title: 'Medium Risk',
-      value: formatNumber(data.risk_distribution.MEDIUM),
+      value: formatNumber(data.risk_distribution?.MEDIUM ?? 0),
       color: 'text-yellow-600',
       bgColor: 'bg-yellow-50',
     },
     {
       title: 'Low Risk',
-      value: formatNumber(data.risk_distribution.LOW),
+      value: formatNumber(data.risk_distribution?.LOW ?? 0),
       color: 'text-green-600',
       bgColor: 'bg-green-50',
     },

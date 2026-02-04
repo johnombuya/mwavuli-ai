@@ -10,14 +10,16 @@ import os
 import hashlib
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Dict
 
 import firebase_admin
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from project root .env only
+_backend_root = Path(__file__).resolve().parent.parent
+load_dotenv(_backend_root.parent / ".env")
 
 # Firebase initialization state
 _db = None

@@ -30,7 +30,8 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(BACKEND_ROOT.parent / ".env")  # project root .env first
+    load_dotenv()  # backend/.env (overrides)
 except ImportError:
     pass  # Optional for --dry-run; use venv + pip install -r requirements.txt for Firestore write
 
@@ -263,7 +264,12 @@ def get_firestore_collection():
     if not service_account_path:
         raise SystemExit("FIREBASE_SERVICE_ACCOUNT_PATH is not set in .env")
     if not os.path.exists(service_account_path):
-        raise SystemExit(f"Credentials file not found: {service_account_path}")
+        # Try project root (e.g. firebase-service-account.json at repo root)
+        fallback = BACKEND_ROOT.parent / "firebase-service-account.json"
+        if fallback.exists():
+            service_account_path = str(fallback)
+        else:
+            raise SystemExit(f"Credentials file not found: {service_account_path}")
     try:
         firebase_admin.get_app()
     except ValueError:
