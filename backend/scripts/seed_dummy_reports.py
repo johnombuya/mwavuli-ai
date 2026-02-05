@@ -30,8 +30,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 try:
     from dotenv import load_dotenv
-    load_dotenv(BACKEND_ROOT.parent / ".env")  # project root .env first
-    load_dotenv()  # backend/.env (overrides)
+    load_dotenv(BACKEND_ROOT / ".env")  # backend/.env only
 except ImportError:
     pass  # Optional for --dry-run; use venv + pip install -r requirements.txt for Firestore write
 
@@ -260,12 +259,13 @@ def get_firestore_collection():
         from firebase_admin import credentials, firestore
     except ImportError:
         raise SystemExit("Install dependencies: pip install firebase-admin python-dotenv (or use venv + pip install -r requirements.txt)")
-    service_account_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
-    if not service_account_path:
-        raise SystemExit("FIREBASE_SERVICE_ACCOUNT_PATH is not set in .env")
-    if not os.path.exists(service_account_path):
-        # Try project root (e.g. firebase-service-account.json at repo root)
-        fallback = BACKEND_ROOT.parent / "firebase-service-account.json"
+    raw_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH") or "firebase-service-account.json"
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = (BACKEND_ROOT / path).resolve()
+    service_account_path = str(path)
+    if not path.exists():
+        fallback = BACKEND_ROOT / "firebase-service-account.json"
         if fallback.exists():
             service_account_path = str(fallback)
         else:

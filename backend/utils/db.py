@@ -17,9 +17,9 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
 
-# Load environment variables from project root .env only
+# Load environment variables from backend/.env only
 _backend_root = Path(__file__).resolve().parent.parent
-load_dotenv(_backend_root.parent / ".env")
+load_dotenv(_backend_root / ".env")
 
 # Firebase initialization state
 _db = None
@@ -37,19 +37,23 @@ def _get_db():
         return _db
     
     try:
-        # Get service account path from environment
-        service_account_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
-        
-        if not service_account_path:
-            print("Warning: FIREBASE_SERVICE_ACCOUNT_PATH not set. Database logging disabled.")
-            _initialized = True
-            return None
-        
-        if not os.path.exists(service_account_path):
-            print(f"Warning: Firebase credentials file not found at {service_account_path}")
-            _initialized = True
-            return None
-        
+        # Get service account path from environment (relative to backend root if not absolute)
+        raw_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
+        if not raw_path:
+            raw_path = "firebase-service-account.json"
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = (_backend_root / path).resolve()
+        service_account_path = str(path)
+        if not path.exists():
+            _fallback = _backend_root / "firebase-service-account.json"
+            if _fallback.exists():
+                service_account_path = str(_fallback)
+            else:
+                print(f"Warning: Firebase credentials file not found at {service_account_path}")
+                _initialized = True
+                return None
+
         # Initialize Firebase Admin SDK
         cred = credentials.Certificate(service_account_path)
         
