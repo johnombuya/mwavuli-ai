@@ -6,8 +6,9 @@ compatible with Looker Studio and other analytics tools.
 """
 
 import csv
-import json
 import io
+import json
+import zipfile
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from utils.db import _get_db
@@ -383,3 +384,21 @@ def export_for_bigquery(start_date: Optional[datetime] = None,
         print(f"Error formatting data for BigQuery: {e}")
         return []
 
+
+def export_report_pack(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> bytes:
+    """
+    Build a ZIP bundle containing reports.csv and summary.json for the date range.
+    Suitable for one-click "report pack" export.
+    """
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        csv_data = export_reports_to_csv(start_date, end_date, None)
+        zf.writestr("reports.csv", csv_data or "no data")
+        stats = analytics.get_summary_stats(start_date, end_date)
+        zf.writestr("summary.json", json.dumps(stats, indent=2, default=str))
+        zf.writestr("methodology.txt", "Mwavuli report pack. See https://github.com/niru-mwavuli for methodology.")
+    buf.seek(0)
+    return buf.read()

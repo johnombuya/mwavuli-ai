@@ -20,3 +20,8 @@ firebase-admin>=6.4.0
 
 # Utilities
 python-dotenv>=1.0.0
+
+# Web ingestion
+feedparser>=6.0.10
+requests>=2.31.0
+trafilatura>=1.6.0

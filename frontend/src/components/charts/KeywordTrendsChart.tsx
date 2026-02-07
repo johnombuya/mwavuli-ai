@@ -27,7 +27,7 @@ export function KeywordTrendsChart({ dateRange }: KeywordTrendsChartProps) {
         <YAxis dataKey="keyword" type="category" width={100} />
         <Tooltip />
         <Legend />
-        <Bar dataKey="count" fill="#3b82f6" />
+        <Bar dataKey="count" fill="#0284c7" name="Count" />
       </BarChart>
     </ResponsiveContainer>
   );

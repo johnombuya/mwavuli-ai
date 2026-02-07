@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from models.text_analyzer import get_analyzer, MwavuliAnalyzer
-from utils.db import save_report, is_database_connected
+from utils.db import save_report, is_database_connected, get_ingestion_last_run, get_recent_reports
 from utils import analytics
 from utils import export
 
@@ -59,6 +59,7 @@ class VerifyResponse(BaseModel):
     )
     scores: Optional[Dict[str, float]] = Field(None, description="Raw toxicity scores")
     matched_keyword: Optional[str] = Field(None, description="Matched high-risk keyword if any")
+    explanation: Optional[str] = Field(None, description="Human-readable reason for the risk level")
 
 
 class HealthResponse(BaseModel):
@@ -242,6 +243,8 @@ async def verify_text(request: VerifyTextRequest):
         
         if result.gemini_context_flag:
             report_data["gemini_context_flag"] = True
+        if result.explanation:
+            report_data["explanation"] = result.explanation
         
         # Save report to Firestore
         report_id = save_report(report_data)
@@ -257,7 +260,8 @@ async def verify_text(request: VerifyTextRequest):
             report_id=report_id,
             prebunking_tip=result.prebunking_tip,
             scores=result.scores,
-            matched_keyword=result.matched_keyword
+            matched_keyword=result.matched_keyword,
+            explanation=result.explanation,
         )
         
     except Exception as e:
@@ -602,6 +606,24 @@ async def get_geographic_heatmap(
         )
 
 
+@app.get("/api/v1/analytics/recent", tags=["Analytics"])
+async def get_recent_reports_endpoint(
+    limit: int = Query(20, ge=1, le=100, description="Maximum number of reports"),
+    status: Optional[str] = Query(None, description="Filter by status: pending, reviewed, escalated")
+):
+    """
+    Get most recent reports for monitoring. Optional filter by status.
+    """
+    try:
+        reports = get_recent_reports(limit=limit, status=(status.strip() or None) if status else None)
+        return {"reports": reports, "count": len(reports)}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving recent reports: {str(e)}"
+        )
+
+
 # Export Endpoints
 @app.get("/api/v1/export/reports", tags=["Export"])
 async def export_reports(
@@ -658,6 +680,33 @@ async def export_reports(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error exporting reports: {str(e)}"
+        )
+
+
+@app.get("/api/v1/export/report-pack", tags=["Export"])
+async def export_report_pack_endpoint(
+    start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+):
+    """
+    Export a report pack (ZIP with reports.csv, summary.json, and methodology note).
+    """
+    try:
+        start_dt = datetime.fromisoformat(start_date) if start_date else None
+        end_dt = datetime.fromisoformat(end_date) if end_date else None
+        zip_bytes = export.export_report_pack(start_dt, end_dt)
+        filename = f"mwavuli_report_pack_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.zip"
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid date format: {str(e)}")
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error building report pack: {str(e)}"
         )
 
 
@@ -780,6 +829,24 @@ async def root():
         },
         "documentation": "/docs"
     }
+
+
+@app.get("/api/v1/ingestion/status", tags=["Ingestion"])
+async def ingestion_status():
+    """
+    Last ingestion run summary (counts, job_id, timestamp).
+    Only available when INGESTION_ADMIN_ENABLED is true.
+    """
+    from utils import ingestion_config
+    if not ingestion_config.is_ingestion_admin_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ingestion admin endpoint is disabled"
+        )
+    last = get_ingestion_last_run()
+    if last is None:
+        return {"status": "no_run_yet", "last_run": None}
+    return {"status": "ok", "last_run": last}
 
 
 if __name__ == "__main__":

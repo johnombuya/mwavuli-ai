@@ -21,13 +21,16 @@ export function HourlyPatternsChart({ dateRange }: HourlyPatternsChartProps) {
 
   // Convert patterns object to array for chart
   const chartData = Object.entries(data.patterns)
-    .map(([hour, values]) => ({
-      hour: `${hour.padStart(2, '0')}:00`,
-      hourNum: parseInt(hour),
-      HIGH: values.HIGH || 0,
-      MEDIUM: values.MEDIUM || 0,
-      LOW: values.LOW || 0,
-    }))
+    .map(([hour, values]) => {
+      const v = values as { HIGH?: number; MEDIUM?: number; LOW?: number };
+      return {
+        hour: `${hour.padStart(2, '0')}:00`,
+        hourNum: parseInt(hour),
+        HIGH: v.HIGH ?? 0,
+        MEDIUM: v.MEDIUM ?? 0,
+        LOW: v.LOW ?? 0,
+      };
+    })
     .sort((a, b) => a.hourNum - b.hourNum);
 
   return (
@@ -38,9 +41,9 @@ export function HourlyPatternsChart({ dateRange }: HourlyPatternsChartProps) {
         <YAxis />
         <Tooltip />
         <Legend />
-        <Bar dataKey="HIGH" stackId="a" fill="#ef4444" />
-        <Bar dataKey="MEDIUM" stackId="a" fill="#f59e0b" />
-        <Bar dataKey="LOW" stackId="a" fill="#10b981" />
+        <Bar dataKey="HIGH" stackId="a" fill="#dc2626" />
+        <Bar dataKey="MEDIUM" stackId="a" fill="#d97706" />
+        <Bar dataKey="LOW" stackId="a" fill="#059669" />
       </BarChart>
     </ResponsiveContainer>
   );

@@ -60,6 +60,7 @@ class AnalysisResult:
     matched_keyword: Optional[str] = None
     gemini_context_flag: bool = False
     prebunking_tip: str = PREBUNKING_TIP
+    explanation: Optional[str] = None  # Human-readable reason for risk (for transparency)
 
 
 class MwavuliAnalyzer:
@@ -334,6 +335,34 @@ Respond with ONLY the translated text, nothing else."""
             print(f"Error in translation: {e}")
             return message
     
+    def _build_explanation(
+        self,
+        risk_level: str,
+        matched_keyword: Optional[str],
+        gemini_context_flag: bool,
+        scores: Dict[str, float],
+    ) -> str:
+        """Build a short human-readable explanation for the risk level."""
+        parts = []
+        if matched_keyword:
+            parts.append(f"Matched lexicon keyword: {matched_keyword}")
+        if gemini_context_flag:
+            parts.append("Gemini flagged Kenyan political context (hate/incitement risk)")
+        if scores and "toxicity" in scores:
+            t = scores.get("toxicity", 0)
+            if t >= 0.7:
+                parts.append(f"High toxicity score: {t:.2f}")
+            elif t >= 0.4:
+                parts.append(f"Moderate toxicity score: {t:.2f}")
+        if not parts:
+            if risk_level == "HIGH":
+                parts.append("Combined signals indicated high risk")
+            elif risk_level == "MEDIUM":
+                parts.append("Combined signals indicated moderate risk")
+            else:
+                parts.append("No harmful signals detected")
+        return " | ".join(parts)
+
     def _generate_response_message(self, risk_level: str, matched_keyword: Optional[str] = None) -> str:
         """
         Generate a human-friendly response message in English.
@@ -399,7 +428,8 @@ Respond with ONLY the translated text, nothing else."""
                 scores={"lexicon_match": 1.0},
                 messages=messages,
                 matched_keyword=matched_keyword,
-                gemini_context_flag=False
+                gemini_context_flag=False,
+                explanation=self._build_explanation("HIGH", matched_keyword, False, {"lexicon_match": 1.0}),
             )
         
         # Step 2: Get Detoxify scores
@@ -451,7 +481,8 @@ Respond with ONLY the translated text, nothing else."""
             scores=scores,
             messages=messages,
             matched_keyword=matched_keyword,
-            gemini_context_flag=gemini_flagged
+            gemini_context_flag=gemini_flagged,
+            explanation=self._build_explanation(risk_level, matched_keyword, gemini_flagged, scores),
         )
     
     def analyze_sync(self, text: str) -> AnalysisResult:
@@ -474,7 +505,8 @@ Respond with ONLY the translated text, nothing else."""
                     "swahili": "Onyo: Ujumbe huu una maudhui hatari.",
                     "sheng": "Heads up: Message iko na vitu mbaya sana."
                 },
-                matched_keyword=matched_keyword
+                matched_keyword=matched_keyword,
+                explanation=self._build_explanation("HIGH", matched_keyword, False, {"lexicon_match": 1.0}),
             )
         
         # Get Detoxify scores
@@ -507,7 +539,8 @@ Respond with ONLY the translated text, nothing else."""
                 "swahili": swahili,
                 "sheng": sheng
             },
-            matched_keyword=matched_keyword
+            matched_keyword=matched_keyword,
+            explanation=self._build_explanation(risk_level, matched_keyword, False, scores),
         )
 
 
