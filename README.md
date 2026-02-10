@@ -105,8 +105,10 @@ The application will be available at:
    - Go to [Firebase Console](https://console.firebase.google.com/)
    - Create a new project or select existing project
    - Enable **Firestore Database**
-   - Create a Service Account and download JSON
-   - Save it as `firebase-service-account.json` in `backend/` directory
+   - Create a Service Account and download the JSON key file
+   - Use `backend/firebase-service-account.example.json` as a template for the required fields
+   - For local development, save it as `firebase-service-account.json` in the `backend/` directory and ensure it is listed in `.gitignore`
+   - For staging/production, do **not** commit the JSON file; store it via your hosting provider’s secret manager or mount it as a file, and set `FIREBASE_SERVICE_ACCOUNT_PATH` in `backend/.env` to that path (e.g. `/secrets/firebase-service-account.json`)
 
 5. **Configure environment variables**:
    ```bash
@@ -287,6 +289,7 @@ FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json
 FIREBASE_DATABASE_ID=mwavuli-nira-db
 GEMINI_API_KEY=your_key_here
 FRONTEND_URL=https://your-frontend-domain.com
+# Optional: see backend/.env.example for INGESTION_* and ALERT_* settings
 ```
 
 **Frontend** (`frontend/.env.local`):

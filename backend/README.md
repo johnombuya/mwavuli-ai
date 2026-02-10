@@ -57,16 +57,61 @@ Copy the example env file and set your values:
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit `.env` and fill in the following:
 
-| Variable | Description |
-|----------|-------------|
-| `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to your Firebase service account JSON (e.g. `./firebase-service-account.json`) |
-| `FIREBASE_DATABASE_ID` | Firestore database ID (leave empty for default) |
-| `GEMINI_API_KEY` | Google Gemini API key ([Google AI Studio](https://makersuite.google.com/app/apikey)) |
-| `TWILIO_AUTH_TOKEN` | (Optional) Twilio auth token for WhatsApp |
+**Core backend configuration**
 
-Place your Firebase service account JSON in the backend folder (or path you set) and ensure it is listed in `.gitignore`.
+| Variable | Required | Default / Example | Description |
+|----------|----------|-------------------|-------------|
+| `FIREBASE_SERVICE_ACCOUNT_PATH` | Yes | `./firebase-service-account.json` | Path to your Firebase service account JSON (relative to `backend/` or absolute). |
+| `FIREBASE_DATABASE_ID` | No | *(empty)* or `mwavuli-nira-db` | Firestore database ID; leave empty to use the default database. |
+| `GEMINI_API_KEY` | Yes | `your_gemini_api_key_here` | Google Gemini API key ([Google AI Studio](https://makersuite.google.com/app/apikey)). |
+| `TWILIO_AUTH_TOKEN` | No | `your_twilio_auth_token_here` | Optional: Twilio auth token for WhatsApp / n8n integration. |
+
+**Web ingestion / auto-reports (optional)**
+
+| Variable | Required | Default / Example | Description |
+|----------|----------|-------------------|-------------|
+| `INGESTION_ENABLED` | No | `false` | Kill switch for web ingestion. Set to `true` to enable ingestion. |
+| `INGESTION_RSS_FEEDS` | No | *(empty)* | Comma-separated list of allowlisted RSS/Atom feed URLs. |
+| `INGESTION_SCRAPE_DOMAINS` | No | *(empty)* | Comma-separated list of allowlisted domains for scraping (e.g. `example.com`). |
+| `INGESTION_SCRAPE_SEED_URLS` | No | *(empty)* | Optional comma-separated list of seed URLs to scrape; each host must be in `INGESTION_SCRAPE_DOMAINS`. |
+| `INGESTION_RATE_LIMIT_REQ_PER_MIN` | No | `30` | Max requests per minute across all sources. |
+| `INGESTION_USER_AGENT` | No | `MwavuliElectionMonitor/1.0` | User-Agent string sent with ingestion requests. |
+| `INGESTION_ELECTION_KEYWORDS` | No | *(empty)* | Optional comma-separated keywords; if set, only items containing at least one keyword are verified. |
+| `INGESTION_JOB_ID` | No | *(empty)* | Optional run identifier for ingestion audit logs. |
+| `INGESTION_ADMIN_ENABLED` | No | `false` | Enable `GET /api/v1/ingestion/status` admin status endpoint. |
+
+**Alerts / early warning (optional)**
+
+| Variable | Required | Default / Example | Description |
+|----------|----------|-------------------|-------------|
+| `ALERT_WEBHOOK_URL` | No | *(empty)* | If set, `run_alerts.py` POSTs a JSON payload here when high-risk counts exceed the threshold. |
+| `ALERT_HIGH_RISK_THRESHOLD` | No | `10` | Number of HIGH-risk reports in the last 24h that will trigger an alert. |
+
+Example `backend/.env` for local development:
+
+```env
+FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json
+FIREBASE_DATABASE_ID=
+GEMINI_API_KEY=your_gemini_api_key_here
+TWILIO_AUTH_TOKEN=
+
+INGESTION_ENABLED=false
+INGESTION_RSS_FEEDS=
+INGESTION_SCRAPE_DOMAINS=
+INGESTION_SCRAPE_SEED_URLS=
+INGESTION_RATE_LIMIT_REQ_PER_MIN=30
+INGESTION_USER_AGENT=MwavuliElectionMonitor/1.0
+INGESTION_ELECTION_KEYWORDS=
+INGESTION_JOB_ID=
+INGESTION_ADMIN_ENABLED=false
+
+ALERT_WEBHOOK_URL=
+ALERT_HIGH_RISK_THRESHOLD=10
+```
+
+Place your Firebase service account JSON in the `backend/` folder (or any path you configure in `FIREBASE_SERVICE_ACCOUNT_PATH`) and ensure it is listed in `.gitignore`.
 
 ## Commands
 
