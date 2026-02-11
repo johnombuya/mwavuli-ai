@@ -14,8 +14,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, status, Query
-from fastapi.responses import StreamingResponse, JSONResponse, Response
+from fastapi import FastAPI, HTTPException, status, Query, Request, Header
+from fastapi.responses import StreamingResponse, JSONResponse, Response, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -23,6 +23,7 @@ from models.text_analyzer import get_analyzer, MwavuliAnalyzer
 from utils.db import save_report, is_database_connected
 from utils import analytics
 from utils import export
+from utils.twilio_client import is_twilio_configured, send_whatsapp_message, validate_twilio_signature
 
 
 # Pydantic Models
@@ -748,6 +749,106 @@ async def export_looker_studio(
         )
 
 
+# ----- Twilio WhatsApp Webhook -----
+
+
+@app.get("/api/v1/webhooks/twilio", tags=["WhatsApp"])
+async def twilio_webhook_get():
+    """
+    Twilio WhatsApp 'Validate URL' callback (GET).
+    Return 200 so Twilio accepts the webhook URL.
+    """
+    return PlainTextResponse("Mwavuli webhook OK", status_code=200)
+
+
+@app.post("/api/v1/webhooks/twilio", tags=["WhatsApp"])
+async def twilio_webhook_post(
+    request: Request,
+    x_twilio_signature: Optional[str] = Header(None, alias="X-Twilio-Signature"),
+):
+    """
+    Twilio WhatsApp incoming message webhook.
+
+    When a user sends a message to your Twilio WhatsApp number, Twilio POSTs
+    here with Body, From, To, etc. We analyze the text, save a report, and
+    send back a verification result + prebunking tip in English (and optionally
+    Swahili for HIGH/MEDIUM risk).
+
+    Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM in .env.
+    Configure this URL in Twilio Console: Messaging > Try it out > WhatsApp Sandbox
+    (or your WhatsApp Sender) > When a message comes in.
+    """
+    # Parse form body (Twilio sends application/x-www-form-urlencoded)
+    form = await request.form()
+    params = dict(form)
+
+    # Optional: validate Twilio signature
+    if x_twilio_signature:
+        url = str(request.url)
+        if not validate_twilio_signature(url, params, x_twilio_signature):
+            raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    body = (params.get("Body") or "").strip()
+    from_number = (params.get("From") or "").strip()
+
+    if not body:
+        # Could reply "Send a message to verify" if Twilio is configured
+        return PlainTextResponse("", status_code=200)
+
+    if not from_number.startswith("whatsapp:"):
+        from_number = f"whatsapp:{from_number}" if from_number.startswith("+") else f"whatsapp:+{from_number}"
+
+    if analyzer is None:
+        if is_twilio_configured():
+            send_whatsapp_message(
+                from_number,
+                "Mwavuli is temporarily unavailable. Please try again later.",
+            )
+        return PlainTextResponse("", status_code=200)
+
+    try:
+        result = await analyzer.analyze(body)
+    except Exception as e:
+        print(f"Twilio webhook analyze error: {e}")
+        if is_twilio_configured():
+            send_whatsapp_message(
+                from_number,
+                "We couldn't analyze that message. Please try again or send a shorter text.",
+            )
+        return PlainTextResponse("", status_code=200)
+
+    # Save report (sender_id = From for anonymized hashing)
+    report_data = {
+        "text": body,
+        "risk_level": result.risk_level,
+        "language": "auto-detect",
+        "county": "unknown",
+        "sender_id": from_number,
+        "scores": result.scores,
+    }
+    if result.matched_keyword:
+        report_data["matched_keyword"] = result.matched_keyword
+    if result.gemini_context_flag:
+        report_data["gemini_context_flag"] = True
+    save_report(report_data)
+
+    # Build reply: main message + prebunking tip
+    reply = result.messages["english"]
+    if result.prebunking_tip:
+        reply += "\n\n" + result.prebunking_tip
+
+    # For HIGH/MEDIUM, append Swahili so users can share with others
+    if result.risk_level in ("HIGH", "MEDIUM"):
+        reply += "\n\n--- Swahili ---\n" + result.messages["swahili"]
+
+    if is_twilio_configured():
+        ok, err = send_whatsapp_message(from_number, reply)
+        if not ok:
+            print(f"Twilio send error: {err}")
+
+    return PlainTextResponse("", status_code=200)
+
+
 @app.get("/", tags=["System"])
 async def root():
     """
@@ -761,6 +862,9 @@ async def root():
             "health": "/health",
             "verify_text": "/api/v1/verify/text",
             "verify_media": "/api/v1/verify/media",
+            "webhooks": {
+                "twilio_whatsapp": "/api/v1/webhooks/twilio",
+            },
             "analytics": {
                 "summary": "/api/v1/analytics/summary",
                 "risk_distribution": "/api/v1/analytics/risk-distribution",
