@@ -10,10 +10,10 @@ interface RiskDistributionChartProps {
 }
 
 const COLORS = {
-  HIGH: '#ef4444',
-  MEDIUM: '#f59e0b',
-  LOW: '#10b981',
-  UNKNOWN: '#6b7280',
+  HIGH: '#dc2626',
+  MEDIUM: '#d97706',
+  LOW: '#059669',
+  UNKNOWN: '#64748b',
 };
 
 export function RiskDistributionChart({ dateRange }: RiskDistributionChartProps) {
@@ -27,10 +27,10 @@ export function RiskDistributionChart({ dateRange }: RiskDistributionChartProps)
   if (!data) return null;
 
   const chartData = Object.entries(data.distribution)
-    .filter(([_, value]) => value > 0)
+    .filter(([, value]) => (value as number) > 0)
     .map(([name, value]) => ({
       name,
-      value,
+      value: value as number,
     }));
 
   return (

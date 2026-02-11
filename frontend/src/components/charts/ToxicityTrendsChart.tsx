@@ -27,7 +27,7 @@ export function ToxicityTrendsChart({ dateRange }: ToxicityTrendsChartProps) {
         <YAxis domain={[0, 1]} />
         <Tooltip />
         <Legend />
-        <Line type="monotone" dataKey="avg_toxicity" stroke="#ef4444" strokeWidth={2} name="Avg Toxicity" />
+        <Line type="monotone" dataKey="avg_toxicity" stroke="#dc2626" strokeWidth={2} name="Avg Toxicity" />
       </LineChart>
     </ResponsiveContainer>
   );

@@ -57,16 +57,61 @@ Copy the example env file and set your values:
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit `.env` and fill in the following:
 
-| Variable | Description |
-|----------|-------------|
-| `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to your Firebase service account JSON (e.g. `./firebase-service-account.json`) |
-| `FIREBASE_DATABASE_ID` | Firestore database ID (leave empty for default) |
-| `GEMINI_API_KEY` | Google Gemini API key ([Google AI Studio](https://makersuite.google.com/app/apikey)) |
-| `TWILIO_AUTH_TOKEN` | (Optional) Twilio auth token for WhatsApp |
+**Core backend configuration**
 
-Place your Firebase service account JSON in the backend folder (or path you set) and ensure it is listed in `.gitignore`.
+| Variable | Required | Default / Example | Description |
+|----------|----------|-------------------|-------------|
+| `FIREBASE_SERVICE_ACCOUNT_PATH` | Yes | `./firebase-service-account.json` | Path to your Firebase service account JSON (relative to `backend/` or absolute). |
+| `FIREBASE_DATABASE_ID` | No | *(empty)* or `mwavuli-nira-db` | Firestore database ID; leave empty to use the default database. |
+| `GEMINI_API_KEY` | Yes | `your_gemini_api_key_here` | Google Gemini API key ([Google AI Studio](https://makersuite.google.com/app/apikey)). |
+| `TWILIO_AUTH_TOKEN` | No | `your_twilio_auth_token_here` | Optional: Twilio auth token for WhatsApp / n8n integration. |
+
+**Web ingestion / auto-reports (optional)**
+
+| Variable | Required | Default / Example | Description |
+|----------|----------|-------------------|-------------|
+| `INGESTION_ENABLED` | No | `false` | Kill switch for web ingestion. Set to `true` to enable ingestion. |
+| `INGESTION_RSS_FEEDS` | No | *(empty)* | Comma-separated list of allowlisted RSS/Atom feed URLs. |
+| `INGESTION_SCRAPE_DOMAINS` | No | *(empty)* | Comma-separated list of allowlisted domains for scraping (e.g. `example.com`). |
+| `INGESTION_SCRAPE_SEED_URLS` | No | *(empty)* | Optional comma-separated list of seed URLs to scrape; each host must be in `INGESTION_SCRAPE_DOMAINS`. |
+| `INGESTION_RATE_LIMIT_REQ_PER_MIN` | No | `30` | Max requests per minute across all sources. |
+| `INGESTION_USER_AGENT` | No | `MwavuliElectionMonitor/1.0` | User-Agent string sent with ingestion requests. |
+| `INGESTION_ELECTION_KEYWORDS` | No | *(empty)* | Optional comma-separated keywords; if set, only items containing at least one keyword are verified. |
+| `INGESTION_JOB_ID` | No | *(empty)* | Optional run identifier for ingestion audit logs. |
+| `INGESTION_ADMIN_ENABLED` | No | `false` | Enable `GET /api/v1/ingestion/status` admin status endpoint. |
+
+**Alerts / early warning (optional)**
+
+| Variable | Required | Default / Example | Description |
+|----------|----------|-------------------|-------------|
+| `ALERT_WEBHOOK_URL` | No | *(empty)* | If set, `run_alerts.py` POSTs a JSON payload here when high-risk counts exceed the threshold. |
+| `ALERT_HIGH_RISK_THRESHOLD` | No | `10` | Number of HIGH-risk reports in the last 24h that will trigger an alert. |
+
+Example `backend/.env` for local development:
+
+```env
+FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json
+FIREBASE_DATABASE_ID=
+GEMINI_API_KEY=your_gemini_api_key_here
+TWILIO_AUTH_TOKEN=
+
+INGESTION_ENABLED=false
+INGESTION_RSS_FEEDS=
+INGESTION_SCRAPE_DOMAINS=
+INGESTION_SCRAPE_SEED_URLS=
+INGESTION_RATE_LIMIT_REQ_PER_MIN=30
+INGESTION_USER_AGENT=MwavuliElectionMonitor/1.0
+INGESTION_ELECTION_KEYWORDS=
+INGESTION_JOB_ID=
+INGESTION_ADMIN_ENABLED=false
+
+ALERT_WEBHOOK_URL=
+ALERT_HIGH_RISK_THRESHOLD=10
+```
+
+Place your Firebase service account JSON in the `backend/` folder (or any path you configure in `FIREBASE_SERVICE_ACCOUNT_PATH`) and ensure it is listed in `.gitignore`.
 
 ## Commands
 
@@ -94,6 +139,16 @@ docker run -p 8000:8000 --env-file .env mwavuli-backend
 ```
 
 ## Testing
+
+### Unit tests (ingestion)
+
+From the `backend` directory (with venv activated and dependencies installed):
+
+```bash
+python -m unittest tests.test_ingestion -v
+```
+
+Tests cover URL normalisation, RSS parsing (if `feedparser` is installed), deduplication, and the pipeline with mocked fetcher/analyzer. Pipeline tests are skipped if `app.ingestion.pipeline` cannot be imported (e.g. missing dependencies). See [docs/FIRESTORE_INDEXES.md](docs/FIRESTORE_INDEXES.md) for Firestore index notes.
 
 ### Test script (Bash)
 
@@ -173,21 +228,93 @@ To populate Firestore with dummy reports for testing the analytics dashboard:
 
 6. **Adding more dummy data later:** Edit `scripts/seed_dummy_reports.py`. Define a function that returns a list of report dicts (use `build_report(...)` for the correct shape), then register it in `REPORT_GENERATORS`. Run with `--generator your_name` or call it from `main()`.
 
+## Web ingestion and auto-reports
+
+The ingestion pipeline continuously fetches content from allowlisted RSS feeds and (optionally) allowlisted websites, deduplicates by URL and content hash, optionally filters by keywords, runs each item through the same verification pipeline as the API, and saves reports with `source_type`, `source_url`, and `created_by=system`. This keeps Mwavuli ahead of the curve without manual submission.
+
+### Enabling ingestion
+
+1. In `.env`, set `INGESTION_ENABLED=true`.
+2. Configure allowlisted sources (only these are ever fetched):
+   - `INGESTION_RSS_FEEDS` — Comma-separated RSS/Atom feed URLs.
+   - `INGESTION_SCRAPE_DOMAINS` — Comma-separated domains allowed for scraping (e.g. `example.com`).
+   - `INGESTION_SCRAPE_SEED_URLS` — (Optional) Comma-separated URLs to scrape; each URL’s host must be in `INGESTION_SCRAPE_DOMAINS`.
+3. Optional: `INGESTION_ELECTION_KEYWORDS` — Comma-separated keywords; only items containing at least one keyword are verified (empty = verify all). `INGESTION_RATE_LIMIT_REQ_PER_MIN`, `INGESTION_USER_AGENT`, `INGESTION_JOB_ID`, `INGESTION_ADMIN_ENABLED` — see `.env.example`.
+
+### Running the pipeline
+
+From the `backend` directory (with venv activated):
+
+```bash
+python scripts/run_ingestion.py
+```
+
+This runs one cycle (fetch → dedupe → filter → verify → save) and prints counts.
+
+### Scheduling with cron
+
+To run every 30 minutes:
+
+```cron
+0,30 * * * * cd /path/to/backend && .venv/bin/python scripts/run_ingestion.py
+```
+
+Windows Task Scheduler or a similar cron equivalent can be used instead.
+
+### Safety
+
+- **Kill switch:** Set `INGESTION_ENABLED=false` (or leave unset) to disable all fetching and verification.
+- **Allowlist:** Only URLs from `INGESTION_RSS_FEEDS` or hosts in `INGESTION_SCRAPE_DOMAINS` are fetched; no arbitrary URLs.
+- **robots.txt:** The scraper checks and obeys robots.txt for each host.
+- **Rate limiting:** Configurable `INGESTION_RATE_LIMIT_REQ_PER_MIN` and polite delays between requests.
+- **User-Agent:** Set an identifiable `INGESTION_USER_AGENT` so site owners can contact you.
+- **Circuit breaker:** A domain that returns repeated 4xx/5xx or timeouts is skipped for the rest of the run.
+- **Audit log:** Each run writes to the `ingestion_audit` Firestore collection (`artifacts/mwavuli/public/data/ingestion_audit`) with action, URL, reason, and optional risk_level. Use it to see why items were skipped or stored.
+
+### Ingestion status endpoint
+
+If `INGESTION_ADMIN_ENABLED=true`, `GET /api/v1/ingestion/status` returns the last run summary (timestamp, job_id, counts). The run_ingestion script writes this after each cycle.
+
+### High-risk review
+
+Reports created by ingestion have `created_by=system` and optional `source_url`. In the dashboard you can filter for `risk_level=HIGH` and `created_by=system` to flag auto-created high-risk content for human review before any external use or escalation.
+
+### Alerts / early warning
+
+An optional job can notify moderators when HIGH risk reports in the last 24 hours exceed a threshold. Set `ALERT_WEBHOOK_URL` (and optionally `ALERT_HIGH_RISK_THRESHOLD`, default 10) in `.env`, then run:
+
+```bash
+python scripts/run_alerts.py
+```
+
+Schedule with cron (e.g. hourly): `0 * * * * cd /path/to/backend && python scripts/run_alerts.py`. On breach, the script POSTs a JSON payload to the webhook (event, timestamp, window_hours, high_risk_count, threshold, distribution).
+
+### Firestore index (optional)
+
+For deduplication, the pipeline queries reports by `source_url` and optionally by `content_hash`. Firestore allows single-field equality queries without a composite index. If you add more complex queries later, create the required indexes in the Firebase Console or via `firestore.indexes.json`.
+
 ## Project structure
 
 ```
 backend/
 ├── app/
-│   └── main.py          # FastAPI app, routes, lifespan
+│   ├── main.py          # FastAPI app, routes, lifespan
+│   └── ingestion/       # Web ingestion pipeline
+│       ├── feed_fetcher.py  # RSS/Atom fetcher
+│       ├── scraper.py       # Allowlisted scraper (robots.txt, rate limit, circuit breaker)
+│       ├── pipeline.py     # fetch -> dedupe -> filter -> verify -> save
+│       └── utils.py        # URL normalisation
 ├── models/
 │   └── text_analyzer.py  # MwavuliAnalyzer (lexicon, Detoxify, Gemini)
 ├── utils/
-│   ├── db.py            # Firestore save_report, get_report, get_recent_reports
+│   ├── db.py            # Firestore save_report, get_report, report_exists_by_source_url, ingestion_audit
+│   ├── ingestion_config.py  # Ingestion env config
 │   ├── analytics.py     # Analytics aggregation
 │   ├── export.py        # CSV/JSON export
 │   └── lexicon.py       # Kenya-specific keywords
 ├── scripts/
-│   ├── seed_dummy_reports.py   # Seed Firestore with dummy reports for analytics testing
+│   ├── run_ingestion.py     # Run one ingestion cycle (for cron)
+│   ├── seed_dummy_reports.py
 │   ├── test_api.sh
 │   └── test_analytics.sh
 ├── docs/

@@ -1,40 +1,56 @@
 'use client';
 
+import { useLanguage } from '@/contexts/LanguageContext';
 import { SummaryCards } from '@/components/dashboard/SummaryCards';
 import { RiskDistributionChart } from '@/components/charts/RiskDistributionChart';
 import { KeywordTrendsChart } from '@/components/charts/KeywordTrendsChart';
 import { ToxicityTrendsChart } from '@/components/charts/ToxicityTrendsChart';
 import { HourlyPatternsChart } from '@/components/charts/HourlyPatternsChart';
 import { CountyHeatmap } from '@/components/dashboard/CountyHeatmap';
+import { RecentReports } from '@/components/dashboard/RecentReports';
 import { DateRangePicker } from '@/components/ui/DateRangePicker';
 import { useState } from 'react';
 
+const chartCardClass =
+  'bg-white rounded-xl border border-slate-200/60 shadow-sm p-6';
+const chartTitleClass = 'text-xl font-semibold text-slate-900 mb-4';
+
 export default function DashboardPage() {
+  const { t } = useLanguage();
   const [dateRange, setDateRange] = useState<{
     start_date?: string;
     end_date?: string;
   }>({});
 
   return (
-    <main className="min-h-screen bg-gray-50 p-4 md:p-8">
+    <div className="p-6 md:p-8">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Mwavuli Analytics Dashboard
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">
+            {t.dashboardTitle}
           </h1>
-          <p className="text-gray-600">
-            Real-time content verification analytics and insights
+          <p className="text-slate-600">
+            {t.dashboardSubtitle}
           </p>
         </div>
 
-        {/* Date Range Picker */}
-        <div className="mb-6">
+        {/* Date Range Picker and Export */}
+        <div className="mb-6 flex flex-wrap items-center gap-4">
           <DateRangePicker
             onDateChange={setDateRange}
             startDate={dateRange.start_date}
             endDate={dateRange.end_date}
           />
+          <a
+            href={`/api/v1/export/report-pack${dateRange.start_date || dateRange.end_date ? '?' + new URLSearchParams({
+              ...(dateRange.start_date && { start_date: dateRange.start_date }),
+              ...(dateRange.end_date && { end_date: dateRange.end_date }),
+            }).toString() : ''}`}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            download
+          >
+            Export report pack
+          </a>
         </div>
 
         {/* Summary Cards */}
@@ -44,40 +60,35 @@ export default function DashboardPage() {
 
         {/* Charts Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          {/* Risk Distribution */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Risk Distribution</h2>
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>{t.riskDistribution}</h2>
             <RiskDistributionChart dateRange={dateRange} />
           </div>
-
-          {/* Keyword Trends */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Top Keywords</h2>
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>{t.topKeywords}</h2>
             <KeywordTrendsChart dateRange={dateRange} />
           </div>
         </div>
 
-        {/* Full Width Charts */}
         <div className="grid grid-cols-1 gap-6 mb-8">
-          {/* Toxicity Trends */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Toxicity Trends</h2>
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>{t.toxicityTrends}</h2>
             <ToxicityTrendsChart dateRange={dateRange} />
           </div>
-
-          {/* Hourly Patterns */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Hourly Patterns</h2>
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>{t.hourlyPatterns}</h2>
             <HourlyPatternsChart dateRange={dateRange} />
           </div>
-
-          {/* County Heatmap */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">County Risk Analysis</h2>
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>{t.countyRiskAnalysis}</h2>
             <CountyHeatmap dateRange={dateRange} />
+          </div>
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>Recent reports</h2>
+            <RecentReports />
           </div>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

@@ -11,7 +11,7 @@ import hashlib
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -341,6 +341,22 @@ def save_report(data: dict) -> Optional[str]:
         if "gemini_context_flag" in data:
             report["gemini_context_flag"] = data["gemini_context_flag"]
         
+        # Optional ingestion fields (reports created by web ingestion)
+        if "source_type" in data:
+            report["source_type"] = data["source_type"]
+        if "source_url" in data:
+            report["source_url"] = data["source_url"]
+        if "content_hash" in data:
+            report["content_hash"] = data["content_hash"]
+        if "created_by" in data:
+            report["created_by"] = data["created_by"]
+        if "ingestion_job_id" in data:
+            report["ingestion_job_id"] = data["ingestion_job_id"]
+        if "explanation" in data:
+            report["explanation"] = data["explanation"]
+        # Default status for moderation workflow (pending / reviewed / escalated)
+        report["status"] = data.get("status", "pending")
+        
         # Save to Firestore
         # Path: artifacts/mwavuli/public/data/reports
         doc_ref = db.collection("artifacts").document("mwavuli").collection("public").document("data").collection("reports").add(report)
@@ -353,6 +369,50 @@ def save_report(data: dict) -> Optional[str]:
     except Exception as e:
         print(f"Error saving report to Firestore: {e}")
         return None
+
+
+def report_exists_by_source_url(source_url: str) -> bool:
+    """
+    Check if a report already exists for the given source URL (deduplication).
+    
+    Args:
+        source_url: Canonical URL of the ingested content
+        
+    Returns:
+        True if at least one report with this source_url exists
+    """
+    db = _get_db()
+    if db is None:
+        return False
+    try:
+        reports_ref = db.collection("artifacts").document("mwavuli").collection("public").document("data").collection("reports")
+        query = reports_ref.where("source_url", "==", source_url).limit(1)
+        return len(list(query.stream())) > 0
+    except Exception as e:
+        print(f"Error checking source_url in Firestore: {e}")
+        return False
+
+
+def report_exists_by_content_hash(content_hash: str) -> bool:
+    """
+    Check if a report already exists for the given content hash (content-level deduplication).
+    
+    Args:
+        content_hash: SHA-256 hash of normalized text
+        
+    Returns:
+        True if at least one report with this content_hash exists
+    """
+    db = _get_db()
+    if db is None:
+        return False
+    try:
+        reports_ref = db.collection("artifacts").document("mwavuli").collection("public").document("data").collection("reports")
+        query = reports_ref.where("content_hash", "==", content_hash).limit(1)
+        return len(list(query.stream())) > 0
+    except Exception as e:
+        print(f"Error checking content_hash in Firestore: {e}")
+        return False
 
 
 def get_report(report_id: str) -> Optional[dict]:
@@ -383,33 +443,34 @@ def get_report(report_id: str) -> Optional[dict]:
         return None
 
 
-def get_recent_reports(limit: int = 10) -> list:
+def get_recent_reports(limit: int = 10, status: Optional[str] = None) -> list:
     """
     Get the most recent reports for monitoring.
     
     Args:
         limit: Maximum number of reports to return
+        status: Optional filter by status (pending, reviewed, escalated)
         
     Returns:
         List of report dictionaries
     """
     db = _get_db()
-    
     if db is None:
         return []
-    
     try:
         reports_ref = db.collection("artifacts").document("mwavuli").collection("public").document("data").collection("reports")
-        query = reports_ref.order_by("timestamp", direction=firestore.Query.DESCENDING).limit(limit)
-        
+        fetch_limit = limit * 4 if status else limit  # fetch extra when filtering in memory
+        query = reports_ref.order_by("timestamp", direction=firestore.Query.DESCENDING).limit(fetch_limit)
         reports = []
         for doc in query.stream():
             report = doc.to_dict()
+            if status and report.get("status") != status:
+                continue
             report["id"] = doc.id
             reports.append(report)
-        
+            if len(reports) >= limit:
+                break
         return reports
-        
     except Exception as e:
         print(f"Error retrieving recent reports: {e}")
         return []
@@ -424,3 +485,77 @@ def is_database_connected() -> bool:
     """
     db = _get_db()
     return db is not None
+
+
+def write_ingestion_audit(
+    action: str,
+    job_id: str = "",
+    source_type: str = "",
+    url: str = "",
+    reason: str = "",
+    risk_level: Optional[str] = None,
+) -> None:
+    """
+    Append an audit record for ingestion pipeline runs.
+    
+    Stored at: artifacts/mwavuli/public/data/ingestion_audit
+    
+    Args:
+        action: One of fetched, duplicate_skipped, filter_skipped, verified, save_failed, error
+        job_id: Ingestion run identifier
+        source_type: rss or scraped
+        url: Candidate URL
+        reason: Optional reason (e.g. "duplicate", "not relevant")
+        risk_level: For verified items, the risk level
+    """
+    db = _get_db()
+    if db is None:
+        return
+    try:
+        ref = db.collection("artifacts").document("mwavuli").collection("public").document("data").collection("ingestion_audit")
+        ref.add({
+            "timestamp": datetime.utcnow(),
+            "job_id": job_id,
+            "action": action,
+            "source_type": source_type,
+            "url": url,
+            "reason": reason,
+            **({"risk_level": risk_level} if risk_level else {}),
+        })
+    except Exception as e:
+        print(f"Error writing ingestion audit: {e}")
+
+
+def set_ingestion_last_run(counts: Dict[str, Any], job_id: str = "") -> None:
+    """
+    Store last ingestion run summary for status endpoint.
+    Path: artifacts/mwavuli/public/data/ingestion_status/last_run
+    """
+    db = _get_db()
+    if db is None:
+        return
+    try:
+        ref = db.collection("artifacts").document("mwavuli").collection("public").document("data").collection("ingestion_status").document("last_run")
+        ref.set({
+            "timestamp": datetime.utcnow(),
+            "job_id": job_id,
+            "counts": counts,
+        })
+    except Exception as e:
+        print(f"Error writing ingestion status: {e}")
+
+
+def get_ingestion_last_run() -> Optional[Dict[str, Any]]:
+    """Return last ingestion run summary (timestamp, job_id, counts) or None."""
+    db = _get_db()
+    if db is None:
+        return None
+    try:
+        ref = db.collection("artifacts").document("mwavuli").collection("public").document("data").collection("ingestion_status").document("last_run")
+        doc = ref.get()
+        if doc and doc.exists:
+            return doc.to_dict()
+        return None
+    except Exception as e:
+        print(f"Error reading ingestion status: {e}")
+        return None

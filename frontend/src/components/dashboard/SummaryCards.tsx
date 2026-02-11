@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { analyticsApi } from '@/lib/api';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatNumber } from '@/lib/utils';
@@ -10,18 +11,25 @@ interface SummaryCardsProps {
 }
 
 export function SummaryCards({ dateRange }: SummaryCardsProps) {
+  const { t } = useLanguage();
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'summary', dateRange],
     queryFn: () => analyticsApi.getSummary(dateRange),
   });
 
+  const cardBase =
+    'bg-white rounded-xl border border-slate-200/60 shadow-sm p-6 border-l-4';
+
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="bg-white rounded-lg shadow p-6 animate-pulse">
-            <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-            <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+          <div
+            key={i}
+            className={`${cardBase} border-l-slate-300 animate-pulse`}
+          >
+            <div className="h-3 bg-slate-200 rounded w-3/4 mb-2 uppercase tracking-wide"></div>
+            <div className="h-8 bg-slate-200 rounded w-1/2"></div>
           </div>
         ))}
       </div>
@@ -30,7 +38,7 @@ export function SummaryCards({ dateRange }: SummaryCardsProps) {
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+      <div className="bg-red-50 border border-red-200 rounded-xl p-4">
         <p className="text-red-800">Error loading summary statistics</p>
       </div>
     );
@@ -40,28 +48,28 @@ export function SummaryCards({ dateRange }: SummaryCardsProps) {
 
   const cards = [
     {
-      title: 'Total Reports',
+      title: t.totalReports,
       value: formatNumber(data.total_reports),
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50',
+      borderColor: 'border-l-primary-500',
+      valueColor: 'text-primary-600',
     },
     {
-      title: 'High Risk',
+      title: t.highRisk,
       value: formatNumber(data.risk_distribution?.HIGH ?? 0),
-      color: 'text-red-600',
-      bgColor: 'bg-red-50',
+      borderColor: 'border-l-red-500',
+      valueColor: 'text-red-600',
     },
     {
-      title: 'Medium Risk',
+      title: t.mediumRisk,
       value: formatNumber(data.risk_distribution?.MEDIUM ?? 0),
-      color: 'text-yellow-600',
-      bgColor: 'bg-yellow-50',
+      borderColor: 'border-l-amber-500',
+      valueColor: 'text-amber-600',
     },
     {
-      title: 'Low Risk',
+      title: t.lowRisk,
       value: formatNumber(data.risk_distribution?.LOW ?? 0),
-      color: 'text-green-600',
-      bgColor: 'bg-green-50',
+      borderColor: 'border-l-green-500',
+      valueColor: 'text-green-600',
     },
   ];
 
@@ -70,10 +78,12 @@ export function SummaryCards({ dateRange }: SummaryCardsProps) {
       {cards.map((card) => (
         <div
           key={card.title}
-          className={`${card.bgColor} rounded-lg shadow p-6 border-l-4 ${card.color.replace('text-', 'border-')}`}
+          className={`${cardBase} ${card.borderColor}`}
         >
-          <h3 className="text-sm font-medium text-gray-600 mb-2">{card.title}</h3>
-          <p className={`text-3xl font-bold ${card.color}`}>{card.value}</p>
+          <h3 className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-2">
+            {card.title}
+          </h3>
+          <p className={`text-3xl font-bold ${card.valueColor}`}>{card.value}</p>
         </div>
       ))}
     </div>

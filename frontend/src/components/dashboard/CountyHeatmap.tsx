@@ -19,15 +19,18 @@ export function CountyHeatmap({ dateRange }: CountyHeatmapProps) {
   if (error) return <div className="text-red-600">Error loading data</div>;
   if (!data || !data.counties) return <div className="text-gray-500">No county data available</div>;
 
-  // Convert counties object to array and sort by risk score
+  type CountyValues = { risk_score: number; HIGH: number; MEDIUM: number; LOW: number };
   const chartData = Object.entries(data.counties)
-    .map(([county, values]) => ({
-      county,
-      riskScore: values.risk_score,
-      high: values.HIGH,
-      medium: values.MEDIUM,
-      low: values.LOW,
-    }))
+    .map(([county, values]) => {
+      const v = values as CountyValues;
+      return {
+        county,
+        riskScore: v.risk_score,
+        high: v.HIGH,
+        medium: v.MEDIUM,
+        low: v.LOW,
+      };
+    })
     .sort((a, b) => b.riskScore - a.riskScore)
     .slice(0, 15); // Top 15 counties
 
@@ -39,9 +42,9 @@ export function CountyHeatmap({ dateRange }: CountyHeatmapProps) {
         <YAxis dataKey="county" type="category" width={120} />
         <Tooltip />
         <Legend />
-        <Bar dataKey="high" stackId="a" fill="#ef4444" name="High Risk" />
-        <Bar dataKey="medium" stackId="a" fill="#f59e0b" name="Medium Risk" />
-        <Bar dataKey="low" stackId="a" fill="#10b981" name="Low Risk" />
+        <Bar dataKey="high" stackId="a" fill="#dc2626" name="High Risk" />
+        <Bar dataKey="medium" stackId="a" fill="#d97706" name="Medium Risk" />
+        <Bar dataKey="low" stackId="a" fill="#059669" name="Low Risk" />
       </BarChart>
     </ResponsiveContainer>
   );
