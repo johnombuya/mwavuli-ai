@@ -66,7 +66,9 @@ Edit `.env` and fill in the following:
 | `FIREBASE_SERVICE_ACCOUNT_PATH` | Yes | `./firebase-service-account.json` | Path to your Firebase service account JSON (relative to `backend/` or absolute). |
 | `FIREBASE_DATABASE_ID` | No | *(empty)* or `mwavuli-nira-db` | Firestore database ID; leave empty to use the default database. |
 | `GEMINI_API_KEY` | Yes | `your_gemini_api_key_here` | Google Gemini API key ([Google AI Studio](https://makersuite.google.com/app/apikey)). |
-| `TWILIO_AUTH_TOKEN` | No | `your_twilio_auth_token_here` | Optional: Twilio auth token for WhatsApp / n8n integration. |
+| `TWILIO_ACCOUNT_SID` | No | *(empty)* | Twilio Account SID (starts with `AC`). Required for WhatsApp replies. See [Twilio WhatsApp setup](docs/TWILIO_WHATSAPP.md). |
+| `TWILIO_AUTH_TOKEN` | No | *(empty)* | Twilio Auth Token (from same Console page as Account SID). |
+| `TWILIO_WHATSAPP_FROM` | No | `whatsapp:+14155238886` | Your Twilio WhatsApp number with `whatsapp:` prefix (sandbox or production). |
 
 **Web ingestion / auto-reports (optional)**
 
@@ -95,7 +97,10 @@ Example `backend/.env` for local development:
 FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json
 FIREBASE_DATABASE_ID=
 GEMINI_API_KEY=your_gemini_api_key_here
+
+TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 
 INGESTION_ENABLED=false
 INGESTION_RSS_FEEDS=
