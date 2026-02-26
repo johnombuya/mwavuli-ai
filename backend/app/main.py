@@ -127,6 +127,11 @@ class AnomaliesResponse(BaseModel):
     threshold: float
 
 
+class TopTokensResponse(BaseModel):
+    """Response model for token-based trends."""
+    tokens: List[Dict[str, Any]]
+
+
 # Global analyzer instance
 analyzer: Optional[MwavuliAnalyzer] = None
 
@@ -626,6 +631,39 @@ async def get_recent_reports_endpoint(
 
 
 # Export Endpoints
+@app.get("/api/v1/analytics/top-tokens", response_model=TopTokensResponse, tags=["Analytics"])
+async def get_top_tokens(
+    limit: int = Query(20, ge=1, le=100, description="Maximum number of tokens to return"),
+    risk_levels: Optional[str] = Query("HIGH", description="Comma-separated risk levels to include"),
+    start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+):
+    """
+    Get most frequent tokens from high-risk reports (text-based trends).
+    """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
+    try:
+        start_dt = datetime.fromisoformat(start_date) if start_date else None
+        end_dt = datetime.fromisoformat(end_date) if end_date else None
+        levels = [lvl.strip().upper() for lvl in (risk_levels or "").split(",") if lvl.strip()]
+        if not levels:
+            levels = ["HIGH"]
+
+        tokens = analytics.get_top_tokens(limit=limit, start_date=start_dt, end_date=end_dt, risk_levels=levels)
+        return TopTokensResponse(tokens=tokens)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving top tokens: {str(e)}"
+        )
+
+
 @app.get("/api/v1/export/reports", tags=["Export"])
 async def export_reports(
     format: str = Query("csv", regex="^(csv|json)$", description="Export format: csv or json"),

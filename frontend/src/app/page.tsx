@@ -4,6 +4,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { SummaryCards } from '@/components/dashboard/SummaryCards';
 import { RiskDistributionChart } from '@/components/charts/RiskDistributionChart';
 import { KeywordTrendsChart } from '@/components/charts/KeywordTrendsChart';
+import { TopTokensChart } from '@/components/charts/TopTokensChart';
 import { ToxicityTrendsChart } from '@/components/charts/ToxicityTrendsChart';
 import { HourlyPatternsChart } from '@/components/charts/HourlyPatternsChart';
 import { CountyHeatmap } from '@/components/dashboard/CountyHeatmap';
@@ -67,6 +68,10 @@ export default function DashboardPage() {
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>{t.topKeywords}</h2>
             <KeywordTrendsChart dateRange={dateRange} />
+            <div className="mt-4 border-t pt-4 text-sm text-slate-600">
+              <p className="font-medium mb-2">Top tokens in high-risk reports</p>
+              <TopTokensChart dateRange={dateRange} />
+            </div>
           </div>
         </div>
 

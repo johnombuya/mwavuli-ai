@@ -100,6 +100,28 @@ export interface GeographicHeatmap {
   }>;
 }
 
+export interface RecentReport {
+  id: string;
+  text?: string;
+  risk_level?: string;
+  status?: string;
+  timestamp?: string;
+}
+
+export interface RecentReportsResponse {
+  reports: RecentReport[];
+  count: number;
+}
+
+export interface TopToken {
+  token: string;
+  count: number;
+}
+
+export interface TopTokensResponse {
+  tokens: TopToken[];
+}
+
 export interface ApiHealth {
   status: string;
   timestamp: string;

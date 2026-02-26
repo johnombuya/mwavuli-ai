@@ -21,6 +21,8 @@ export function CountyHeatmap({ dateRange }: CountyHeatmapProps) {
 
   type CountyValues = { risk_score: number; HIGH: number; MEDIUM: number; LOW: number };
   const chartData = Object.entries(data.counties)
+    // Filter out \"unknown\" pseudo-county to focus on real locations
+    .filter(([county]) => county.toLowerCase() !== 'unknown')
     .map(([county, values]) => {
       const v = values as CountyValues;
       return {
@@ -33,6 +35,10 @@ export function CountyHeatmap({ dateRange }: CountyHeatmapProps) {
     })
     .sort((a, b) => b.riskScore - a.riskScore)
     .slice(0, 15); // Top 15 counties
+
+  if (chartData.length === 0) {
+    return <div className="text-gray-500">Only reports without county metadata so far.</div>;
+  }
 
   return (
     <ResponsiveContainer width="100%" height={400}>

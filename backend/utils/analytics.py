@@ -556,6 +556,49 @@ def get_anomalies(start_date: Optional[datetime] = None,
     query_ref, has_filters = _build_date_filter(start_date, end_date)
     if query_ref is None:
         return []
+
+
+def get_top_tokens(limit: int = 20,
+                   start_date: Optional[datetime] = None,
+                   end_date: Optional[datetime] = None,
+                   risk_levels: Optional[List[str]] = None,
+                   min_length: int = 4) -> List[Dict]:
+    """
+    Get most frequent tokens from high-risk reports.
+
+    This is a heuristic text-based trend separate from lexicon keywords.
+    """
+    query_ref, _ = _build_date_filter(start_date, end_date)
+    if query_ref is None:
+        return []
+
+    try:
+        token_counter = Counter()
+        risk_set = set(risk_levels or ["HIGH"])
+
+        for doc in query_ref.stream():
+            data = doc.to_dict()
+            if data.get("risk_level") not in risk_set:
+                continue
+            text = str(data.get("text", "")).lower()
+            if not text:
+                continue
+            # Simple tokenization: split on whitespace and strip punctuation
+            for raw in text.split():
+                token = "".join(ch for ch in raw if ch.isalnum() or ch in {"@", "#"})
+                if not token or token.startswith("http"):
+                    continue
+                if len(token) < min_length and not token.startswith(("@", "#")):
+                    continue
+                token_counter[token] += 1
+
+        return [
+            {"token": token, "count": count}
+            for token, count in token_counter.most_common(limit)
+        ]
+    except Exception as e:
+        print(f"Error getting top tokens: {e}")
+        return []
     
     try:
         # Group by date
