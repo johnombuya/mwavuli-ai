@@ -25,3 +25,7 @@ python-dotenv>=1.0.0
 feedparser>=6.0.10
 requests>=2.31.0
 trafilatura>=1.6.0
+
+# Kaggle import script
+kagglehub
+pandas
