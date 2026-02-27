@@ -639,3 +639,142 @@ def get_top_tokens(limit: int = 20,
         print(f"Error detecting anomalies: {e}")
         return []
 
+
+def get_detection_method_risk_matrix(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> Dict:
+    """
+    Aggregate counts by detection_method and risk_level.
+    """
+    query_ref, _ = _build_date_filter(start_date, end_date)
+    if query_ref is None:
+        return {}
+
+    try:
+        matrix: Dict[str, Dict[str, int]] = defaultdict(
+            lambda: {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0, "total": 0}
+        )
+
+        for doc in query_ref.stream():
+            data = doc.to_dict()
+            method = data.get("detection_method", "unknown")
+            risk = data.get("risk_level", "UNKNOWN")
+            row = matrix[method]
+            row[risk] = row.get(risk, 0) + 1
+            row["total"] += 1
+
+        return dict(matrix)
+    except Exception as e:
+        print(f"Error getting detection method risk matrix: {e}")
+        return {}
+
+
+def get_confidence_histogram(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    bucket_size: float = 0.1,
+) -> List[Dict]:
+    """
+    Build histogram of confidence_score across reports.
+    """
+    query_ref, _ = _build_date_filter(start_date, end_date)
+    if query_ref is None:
+        return []
+
+    try:
+        buckets: Dict[str, int] = Counter()
+
+        for doc in query_ref.stream():
+            data = doc.to_dict()
+            score = data.get("confidence_score")
+            if not isinstance(score, (int, float)):
+                continue
+            # Clamp to [0, 1]
+            s = max(0.0, min(1.0, float(score)))
+            bucket_index = int(s / bucket_size)
+            if bucket_index >= int(1.0 / bucket_size):
+                bucket_index = int(1.0 / bucket_size) - 1
+            start = round(bucket_index * bucket_size, 2)
+            end = round(start + bucket_size, 2)
+            label = f"{start:.2f}-{end:.2f}"
+            buckets[label] += 1
+
+        return [
+            {"bucket": label, "count": count}
+            for label, count in sorted(buckets.items())
+        ]
+    except Exception as e:
+        print(f"Error getting confidence histogram: {e}")
+        return []
+
+
+def get_url_mention_risk_stats(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> Dict:
+    """
+    Compare risk distributions for reports with/without URLs and mentions.
+    """
+    query_ref, _ = _build_date_filter(start_date, end_date)
+    if query_ref is None:
+        return {}
+
+    try:
+        def empty_dist() -> Dict[str, int]:
+            return {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0, "total": 0}
+
+        stats = {
+            "with_urls": empty_dist(),
+            "without_urls": empty_dist(),
+            "with_mentions": empty_dist(),
+            "without_mentions": empty_dist(),
+        }
+
+        for doc in query_ref.stream():
+            data = doc.to_dict()
+            risk = data.get("risk_level", "UNKNOWN")
+            has_urls = bool(data.get("has_urls"))
+            has_mentions = bool(data.get("has_mentions"))
+
+            url_key = "with_urls" if has_urls else "without_urls"
+            ment_key = "with_mentions" if has_mentions else "without_mentions"
+
+            for key in (url_key, ment_key):
+                dist = stats[key]
+                dist[risk] = dist.get(risk, 0) + 1
+                dist["total"] += 1
+
+        return stats
+    except Exception as e:
+        print(f"Error getting URL/mention risk stats: {e}")
+        return {}
+
+
+def get_status_counts(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> Dict:
+    """
+    Count reports by moderation status.
+    """
+    query_ref, _ = _build_date_filter(start_date, end_date)
+    if query_ref is None:
+        return {}
+
+    try:
+        counts: Dict[str, int] = Counter()
+
+        for doc in query_ref.stream():
+            data = doc.to_dict()
+            status = (data.get("status") or "pending").lower()
+            counts[status] += 1
+
+        total = sum(counts.values())
+        return {
+            "counts": dict(counts),
+            "total": total,
+        }
+    except Exception as e:
+        print(f"Error getting status counts: {e}")
+        return {}

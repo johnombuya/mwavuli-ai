@@ -11,6 +11,9 @@ have historically been used to incite ethnic violence. This lexicon
 helps catch such terms that AI models trained on Western data may miss.
 """
 
+import csv
+import os
+from pathlib import Path
 from typing import Optional, Tuple
 
 
@@ -18,37 +21,56 @@ from typing import Optional, Tuple
 # These terms have historically been associated with ethnic incitement
 HIGH_RISK_KEYWORDS = [
     # Ethnic metaphors used in past violence
-    "kwekwe",           # Derogatory term, associated with 2007 violence
-    "madoadoa",         # "Spots" - coded term for ethnic minorities
-    "kama mende",       # "Like cockroaches" - dehumanizing language
-    "wageni",           # "Foreigners" - used to delegitimize citizens
-    "wabara",           # Derogatory term for inland communities
-    "wahamiaji",        # "Immigrants" - used as ethnic slur
-    
+    "kwekwe",  # Derogatory term, associated with 2007 violence
+    "madoadoa",  # "Spots" - coded term for ethnic minorities
+    "kama mende",  # "Like cockroaches" - dehumanizing language
+    "wageni",  # "Foreigners" - used to delegitimize citizens
+    "wabara",  # Derogatory term for inland communities
+    "wahamiaji",  # "Immigrants" - used as ethnic slur
     # Political incitement phrases
-    "funga debe",       # "Close the tin" - election manipulation
-    "piga debe",        # Related to ballot stuffing
-    "no raila no peace", # Incitement phrase
-    "41 vs 1",          # Ethnic coalition framing
-    "kura yangu",       # Can be used in incitement context
-    
+    "funga debe",  # "Close the tin" - election manipulation
+    "piga debe",  # Related to ballot stuffing
+    "no raila no peace",  # Incitement phrase
+    "41 vs 1",  # Ethnic coalition framing
+    "kura yangu",  # Can be used in incitement context
     # Violent language
-    "songa mbele",      # "Move forward" - can be violence incitement
-    "toeni",            # "Remove them" - ethnic cleansing language
-    "wafukuze",         # "Chase them away"
-    "wachinje",         # Explicit violence
-    "ondoeni",          # "Remove" - often ethnic targeting
-    
+    "songa mbele",  # "Move forward" - can be violence incitement
+    "toeni",  # "Remove them" - ethnic cleansing language
+    "wafukuze",  # "Chase them away"
+    "wachinje",  # Explicit violence
+    "ondoeni",  # "Remove" - often ethnic targeting
     # Coded political terms
-    "uthamaki",         # Ethnic supremacy ideology
-    "mlevi",            # "Drunkard" - coded political insult
-    "mganga",           # "Witch doctor" - coded political attack
-    "wezi",             # "Thieves" - can incite violence against groups
-    
+    "uthamaki",  # Ethnic supremacy ideology
+    "mlevi",  # "Drunkard" - coded political insult
+    "mganga",  # "Witch doctor" - coded political attack
+    "wezi",  # "Thieves" - can incite violence against groups
     # Incitement slogans
-    "hatupangwingwi",   # Political slogan that can be used aggressively
-    "baba tosha",       # Context-dependent political phrase
-    "tuko pamoja",      # Can be used for ethnic solidarity incitement
+    "hatupangwingwi",  # Political slogan that can be used aggressively
+    "baba tosha",  # Context-dependent political phrase
+    "tuko pamoja",  # Can be used for ethnic solidarity incitement
+    # Additional high-risk terms from lexicon CSV
+    "fumigation",
+    "uncircumcised",
+    "eliminate",
+    "kill",
+    "wabara waende kwao",
+    "kaffir",
+    "mende",
+    "kihii",
+    "kimurkeldet",
+    "otutu labotonik",
+    "sangara",
+    "bunyot",
+    "wakuja",
+    "chinja kafir",
+    "brown teeth",
+    "kalenjin weti",
+    "orm",
+    "mandera militant",
+    "garissa gun",
+    "laikipia rancher foe",
+    "panga squad",
+    "kamba assassins",
 ]
 
 # Medium-risk keywords - flag for additional context check
@@ -60,6 +82,37 @@ MEDIUM_RISK_KEYWORDS = [
     "mwizi",            # "Thief" - political accusation
     "mkora",            # "Crook" - political insult
     "tumerudishwa",     # Grievance language
+    # Additional medium-risk terms from lexicon CSV
+    "chunga kura",
+    "watajua hawajui",
+    "kama noma noma",
+    "operation linda kura",
+    "uthamaki ni witu",
+    "ngetiik",
+    "maharagwe",
+    "sipangwingwi",
+    "kama mbaya mbaya",
+    "watu wa kurusha mawe",
+    "secure the vote",
+    "mabesha",
+    "mzungu mdogo",
+    "kamba machete",
+    "turkana ak-47",
+    "masai morans",
+    "borana well",
+    "nyanza witch",
+    "rift valley cow",
+    "ukambani snake",
+    "kisumu stone",
+    "nakuru hyena",
+    "mombasa pirate",
+    "kericho tea thief",
+    "rungu wielder",
+    "arrow boys",
+    "kalenjin warriors",
+    "luo youth",
+    "kikuyu goons",
+    "wajir camel jockey",
 ]
 
 
@@ -112,5 +165,61 @@ def get_keyword_context(keyword: str) -> str:
         "toeni": "Removal language often used in context of ethnic cleansing.",
     }
     
-    return contexts.get(keyword.lower(), "This term has been flagged as potentially harmful in the Kenyan political context.")
+    return contexts.get(
+        keyword.lower(),
+        (
+            "This term has been flagged as potentially harmful in the "
+            "Kenyan political context."
+        ),
+    )
+
+
+def _default_csv_path() -> Path:
+    """
+    Compute default path to the optional lexicon CSV at repo root.
+    """
+    root = Path(__file__).resolve().parents[2]
+    return root / (
+        "term-language-literalmeaning-impliedmeaningcontext-"
+        "category-risklevelguess-exampleusageparaphrased-"
+        "notesformoderators.csv"
+    )
+
+
+def _extend_keywords_from_csv() -> None:
+    """
+    Optionally extend HIGH/MEDIUM keyword lists from a CSV file.
+    
+    The CSV is expected to have columns:
+    term, language, literal_meaning, implied_meaning_context,
+    category, risk_level_guess, example_usage_paraphrased,
+    notes_for_moderators.
+    
+    Only rows with risk_level_guess of HIGH or MEDIUM are used.
+    """
+    csv_env = os.getenv("MWAVULI_LEXICON_CSV_PATH")
+    path = Path(csv_env) if csv_env else _default_csv_path()
+    if not path.exists():
+        return
+
+    try:
+        with path.open(newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                term = (row.get("term") or "").strip()
+                level = (row.get("risk_level_guess") or "").strip().upper()
+                if not term or level not in {"HIGH", "MEDIUM"}:
+                    continue
+                if level == "HIGH":
+                    if term not in HIGH_RISK_KEYWORDS:
+                        HIGH_RISK_KEYWORDS.append(term)
+                else:
+                    if term not in MEDIUM_RISK_KEYWORDS:
+                        MEDIUM_RISK_KEYWORDS.append(term)
+    except Exception:
+        # Fail safely: keep the built-in lexicon only
+        return
+
+
+_extend_keywords_from_csv()
 

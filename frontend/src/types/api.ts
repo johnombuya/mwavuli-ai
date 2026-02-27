@@ -122,6 +122,53 @@ export interface TopTokensResponse {
   tokens: TopToken[];
 }
 
+export interface DetectionRiskMatrix {
+  [method: string]: {
+    HIGH: number;
+    MEDIUM: number;
+    LOW: number;
+    UNKNOWN: number;
+    total: number;
+  };
+}
+
+export interface DetectionRiskMatrixResponse {
+  matrix: DetectionRiskMatrix;
+}
+
+export interface ConfidenceBucket {
+  bucket: string;
+  count: number;
+}
+
+export interface ConfidenceHistogramResponse {
+  buckets: ConfidenceBucket[];
+}
+
+export interface UrlRiskDist {
+  HIGH: number;
+  MEDIUM: number;
+  LOW: number;
+  UNKNOWN: number;
+  total: number;
+}
+
+export interface UrlMentionRiskStats {
+  with_urls: UrlRiskDist;
+  without_urls: UrlRiskDist;
+  with_mentions: UrlRiskDist;
+  without_mentions: UrlRiskDist;
+}
+
+export interface UrlMentionRiskResponse {
+  stats: UrlMentionRiskStats;
+}
+
+export interface StatusSummaryResponse {
+  counts: Record<string, number>;
+  total: number;
+}
+
 export interface ApiHealth {
   status: string;
   timestamp: string;

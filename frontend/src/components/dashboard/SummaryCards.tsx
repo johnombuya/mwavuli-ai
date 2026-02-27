@@ -16,6 +16,10 @@ export function SummaryCards({ dateRange }: SummaryCardsProps) {
     queryKey: ['analytics', 'summary', dateRange],
     queryFn: () => analyticsApi.getSummary(dateRange),
   });
+  const { data: statusSummary } = useQuery({
+    queryKey: ['analytics', 'status-summary', dateRange],
+    queryFn: () => analyticsApi.getStatusSummary(dateRange),
+  });
 
   const cardBase =
     'bg-white rounded-xl border border-slate-200/60 shadow-sm p-6 border-l-4';
@@ -46,6 +50,10 @@ export function SummaryCards({ dateRange }: SummaryCardsProps) {
 
   if (!data) return null;
 
+  const pendingCount = statusSummary?.counts?.pending ?? 0;
+  const reviewedCount = statusSummary?.counts?.reviewed ?? 0;
+  const escalatedCount = statusSummary?.counts?.escalated ?? 0;
+
   const cards = [
     {
       title: t.totalReports,
@@ -70,6 +78,14 @@ export function SummaryCards({ dateRange }: SummaryCardsProps) {
       value: formatNumber(data.risk_distribution?.LOW ?? 0),
       borderColor: 'border-l-green-500',
       valueColor: 'text-green-600',
+    },
+    {
+      title: 'Pending / Reviewed / Escalated',
+      value: `${formatNumber(pendingCount)} / ${formatNumber(
+        reviewedCount,
+      )} / ${formatNumber(escalatedCount)}`,
+      borderColor: 'border-l-slate-400',
+      valueColor: 'text-slate-700',
     },
   ];
 

@@ -11,6 +11,9 @@ import { CountyHeatmap } from '@/components/dashboard/CountyHeatmap';
 import { RecentReports } from '@/components/dashboard/RecentReports';
 import { DateRangePicker } from '@/components/ui/DateRangePicker';
 import { useState } from 'react';
+import { DetectionRiskChart } from '@/components/charts/DetectionRiskChart';
+import { ConfidenceHistogramChart } from '@/components/charts/ConfidenceHistogramChart';
+import { UrlMentionRiskChart } from '@/components/charts/UrlMentionRiskChart';
 
 const chartCardClass =
   'bg-white rounded-xl border border-slate-200/60 shadow-sm p-6';
@@ -87,6 +90,20 @@ export default function DashboardPage() {
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>{t.countyRiskAnalysis}</h2>
             <CountyHeatmap dateRange={dateRange} />
+          </div>
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>Detection methods vs risk</h2>
+            <DetectionRiskChart dateRange={dateRange} />
+          </div>
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>
+              Confidence score distribution
+            </h2>
+            <ConfidenceHistogramChart dateRange={dateRange} />
+          </div>
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>URLs &amp; mentions vs risk</h2>
+            <UrlMentionRiskChart dateRange={dateRange} />
           </div>
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>Recent reports</h2>
