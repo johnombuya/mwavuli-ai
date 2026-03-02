@@ -32,3 +32,4 @@ trafilatura>=1.6.0
 # Kaggle import script
 kagglehub
 pandas
+python-multipart>=0.0.9
