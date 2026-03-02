@@ -10,6 +10,7 @@ Or: cd backend && uvicorn app.main:app --reload
 """
 
 import os
+import asyncio
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
@@ -125,6 +126,32 @@ class AnomaliesResponse(BaseModel):
     """Response model for anomaly detection."""
     anomalies: List[Dict[str, Any]]
     threshold: float
+
+
+class TopTokensResponse(BaseModel):
+    """Response model for token-based trends."""
+    tokens: List[Dict[str, Any]]
+
+
+class DetectionRiskMatrixResponse(BaseModel):
+    """Response model for detection method vs risk matrix."""
+    matrix: Dict[str, Dict[str, Any]]
+
+
+class ConfidenceHistogramResponse(BaseModel):
+    """Response model for confidence score histogram."""
+    buckets: List[Dict[str, Any]]
+
+
+class UrlMentionRiskResponse(BaseModel):
+    """Response model for URL/mention risk comparison."""
+    stats: Dict[str, Dict[str, Any]]
+
+
+class StatusSummaryResponse(BaseModel):
+    """Response model for moderation status counts."""
+    counts: Dict[str, int]
+    total: int
 
 
 # Global analyzer instance
@@ -332,7 +359,11 @@ async def get_summary_stats(
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         
-        stats = analytics.get_summary_stats(start_dt, end_dt)
+        stats = await asyncio.to_thread(
+            analytics.get_summary_stats,
+            start_dt,
+            end_dt,
+        )
         response_data = SummaryStatsResponse(**stats)
         
         # Add cache headers (2 minutes) for frontend polling
@@ -372,7 +403,11 @@ async def get_risk_distribution(
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         
-        distribution = analytics.get_risk_level_distribution(start_dt, end_dt)
+        distribution = await asyncio.to_thread(
+            analytics.get_risk_level_distribution,
+            start_dt,
+            end_dt,
+        )
         total = sum(distribution.values())
         
         response_data = RiskDistributionResponse(distribution=distribution, total=total)
@@ -411,7 +446,12 @@ async def get_county_analysis(
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         
-        analysis = analytics.get_county_risk_analysis(county, start_dt, end_dt)
+        analysis = await asyncio.to_thread(
+            analytics.get_county_risk_analysis,
+            county,
+            start_dt,
+            end_dt,
+        )
         return CountyAnalysisResponse(counties=analysis)
     except ValueError as e:
         raise HTTPException(
@@ -442,7 +482,12 @@ async def get_keyword_trends(
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         
-        keywords = analytics.get_keyword_trends(limit, start_dt, end_dt)
+        keywords = await asyncio.to_thread(
+            analytics.get_keyword_trends,
+            limit,
+            start_dt,
+            end_dt,
+        )
         return KeywordTrendsResponse(keywords=keywords, total_keywords=len(keywords))
     except ValueError as e:
         raise HTTPException(
@@ -473,7 +518,12 @@ async def get_toxicity_trends(
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         
-        trends = analytics.get_toxicity_trends(days, start_dt, end_dt)
+        trends = await asyncio.to_thread(
+            analytics.get_toxicity_trends,
+            days,
+            start_dt,
+            end_dt,
+        )
         return ToxicityTrendsResponse(trends=trends, period_days=days)
     except ValueError as e:
         raise HTTPException(
@@ -503,7 +553,11 @@ async def get_hourly_patterns(
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         
-        patterns = analytics.get_hourly_patterns(start_dt, end_dt)
+        patterns = await asyncio.to_thread(
+            analytics.get_hourly_patterns,
+            start_dt,
+            end_dt,
+        )
         return PatternAnalysisResponse(patterns=patterns, pattern_type="hourly")
     except ValueError as e:
         raise HTTPException(
@@ -533,7 +587,11 @@ async def get_daily_patterns(
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         
-        patterns = analytics.get_daily_patterns(start_dt, end_dt)
+        patterns = await asyncio.to_thread(
+            analytics.get_daily_patterns,
+            start_dt,
+            end_dt,
+        )
         return PatternAnalysisResponse(patterns=patterns, pattern_type="daily")
     except ValueError as e:
         raise HTTPException(
@@ -563,7 +621,11 @@ async def get_detection_comparison(
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         
-        comparison = analytics.get_gemini_vs_lexicon_comparison(start_dt, end_dt)
+        comparison = await asyncio.to_thread(
+            analytics.get_gemini_vs_lexicon_comparison,
+            start_dt,
+            end_dt,
+        )
         return DetectionComparisonResponse(comparison=comparison)
     except ValueError as e:
         raise HTTPException(
@@ -574,6 +636,138 @@ async def get_detection_comparison(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving detection comparison: {str(e)}"
+        )
+
+
+@app.get("/api/v1/analytics/detection-risk-matrix", response_model=DetectionRiskMatrixResponse, tags=["Analytics"])
+async def get_detection_risk_matrix(
+    start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+):
+    """
+    Aggregate counts by detection method and risk level.
+    """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
+    try:
+        start_dt = datetime.fromisoformat(start_date) if start_date else None
+        end_dt = datetime.fromisoformat(end_date) if end_date else None
+
+        matrix = await asyncio.to_thread(
+            analytics.get_detection_method_risk_matrix,
+            start_dt,
+            end_dt,
+        )
+        return DetectionRiskMatrixResponse(matrix=matrix)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving detection risk matrix: {str(e)}"
+        )
+
+
+@app.get("/api/v1/analytics/confidence-histogram", response_model=ConfidenceHistogramResponse, tags=["Analytics"])
+async def get_confidence_histogram(
+    bucket_size: float = Query(0.1, ge=0.01, le=0.5, description="Bucket size for confidence bins"),
+    start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+):
+    """
+    Get histogram of confidence_score across reports.
+    """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
+    try:
+        start_dt = datetime.fromisoformat(start_date) if start_date else None
+        end_dt = datetime.fromisoformat(end_date) if end_date else None
+
+        buckets = await asyncio.to_thread(
+            analytics.get_confidence_histogram,
+            start_dt,
+            end_dt,
+            bucket_size=bucket_size,
+        )
+        return ConfidenceHistogramResponse(buckets=buckets)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving confidence histogram: {str(e)}"
+        )
+
+
+@app.get("/api/v1/analytics/url-mention-risk", response_model=UrlMentionRiskResponse, tags=["Analytics"])
+async def get_url_mention_risk(
+    start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+):
+    """
+    Compare risk distributions for reports with/without URLs and mentions.
+    """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
+    try:
+        start_dt = datetime.fromisoformat(start_date) if start_date else None
+        end_dt = datetime.fromisoformat(end_date) if end_date else None
+
+        stats = await asyncio.to_thread(
+            analytics.get_url_mention_risk_stats,
+            start_dt,
+            end_dt,
+        )
+        return UrlMentionRiskResponse(stats=stats)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving URL/mention risk stats: {str(e)}"
+        )
+
+
+@app.get("/api/v1/analytics/status-summary", response_model=StatusSummaryResponse, tags=["Analytics"])
+async def get_status_summary(
+    start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+):
+    """
+    Get counts of reports by moderation status.
+    """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
+    try:
+        start_dt = datetime.fromisoformat(start_date) if start_date else None
+        end_dt = datetime.fromisoformat(end_date) if end_date else None
+
+        summary = await asyncio.to_thread(
+            analytics.get_status_counts,
+            start_dt,
+            end_dt,
+        )
+        if not summary:
+            return StatusSummaryResponse(counts={}, total=0)
+        return StatusSummaryResponse(**summary)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving status summary: {str(e)}"
         )
 
 
@@ -593,7 +787,11 @@ async def get_geographic_heatmap(
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         
-        heatmap = analytics.get_geographic_heatmap(start_dt, end_dt)
+        heatmap = await asyncio.to_thread(
+            analytics.get_geographic_heatmap,
+            start_dt,
+            end_dt,
+        )
         return GeographicHeatmapResponse(counties=heatmap)
     except ValueError as e:
         raise HTTPException(
@@ -605,27 +803,78 @@ async def get_geographic_heatmap(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving geographic heatmap: {str(e)}"
         )
-
-
+    
+    
 @app.get("/api/v1/analytics/recent", tags=["Analytics"])
 async def get_recent_reports_endpoint(
     limit: int = Query(20, ge=1, le=100, description="Maximum number of reports"),
-    status: Optional[str] = Query(None, description="Filter by status: pending, reviewed, escalated")
+    status_filter: Optional[str] = Query(
+        None,
+        description="Filter by status: pending, reviewed, escalated",
+    ),
 ):
     """
     Get most recent reports for monitoring. Optional filter by status.
     """
     try:
-        reports = get_recent_reports(limit=limit, status=(status.strip() or None) if status else None)
+        status_param = (status_filter.strip() or None) if status_filter else None
+        reports = await asyncio.to_thread(
+            get_recent_reports,
+            limit,
+            status_param,
+        )
         return {"reports": reports, "count": len(reports)}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving recent reports: {str(e)}"
+            detail=f"Error retrieving recent reports: {str(e)}",
         )
 
 
 # Export Endpoints
+@app.get("/api/v1/analytics/top-tokens", response_model=TopTokensResponse, tags=["Analytics"])
+async def get_top_tokens(
+    limit: int = Query(20, ge=1, le=100, description="Maximum number of tokens to return"),
+    risk_levels: Optional[str] = Query("HIGH", description="Comma-separated risk levels to include"),
+    start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+):
+    """
+    Get most frequent tokens from high-risk reports (text-based trends).
+    """
+    start_date = (start_date or "").strip() or None
+    end_date = (end_date or "").strip() or None
+    try:
+        start_dt = datetime.fromisoformat(start_date) if start_date else None
+        end_dt = datetime.fromisoformat(end_date) if end_date else None
+        levels = [
+            lvl.strip().upper()
+            for lvl in (risk_levels or "").split(",")
+            if lvl.strip()
+        ]
+        if not levels:
+            levels = ["HIGH"]
+
+        tokens = await asyncio.to_thread(
+            analytics.get_top_tokens,
+            limit,
+            start_dt,
+            end_dt,
+            levels,
+        )
+        return TopTokensResponse(tokens=tokens)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving top tokens: {str(e)}"
+        )
+
+
 @app.get("/api/v1/export/reports", tags=["Export"])
 async def export_reports(
     format: str = Query("csv", regex="^(csv|json)$", description="Export format: csv or json"),
@@ -645,30 +894,45 @@ async def export_reports(
         field_list = [f.strip() for f in fields.split(",")] if fields else None
         
         if format == "csv":
-            csv_data = export.export_reports_to_csv(start_dt, end_dt, field_list)
+            csv_data = await asyncio.to_thread(
+                export.export_reports_to_csv,
+                start_dt,
+                end_dt,
+                field_list,
+            )
             if not csv_data:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="No reports found for the specified date range"
+                    detail="No reports found for the specified date range",
                 )
             
             filename = f"mwavuli_reports_{datetime.utcnow().strftime('%Y%m%d')}.csv"
             return StreamingResponse(
                 iter([csv_data]),
                 media_type="text/csv",
-                headers={"Content-Disposition": f"attachment; filename={filename}"}
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
             )
         else:  # json
-            json_data = export.export_reports_to_json(start_dt, end_dt, flatten=False)
+            json_data = await asyncio.to_thread(
+                export.export_reports_to_json,
+                start_dt,
+                end_dt,
+                False,
+            )
             if not json_data:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="No reports found for the specified date range"
+                    detail="No reports found for the specified date range",
                 )
             
             return JSONResponse(
                 content=json_data,
-                headers={"Content-Disposition": f"attachment; filename=mwavuli_reports_{datetime.utcnow().strftime('%Y%m%d')}.json"}
+                headers={
+                    "Content-Disposition": (
+                        "attachment; "
+                        f"filename=mwavuli_reports_{datetime.utcnow().strftime('%Y%m%d')}.json"
+                    )
+                },
             )
     except ValueError as e:
         raise HTTPException(
@@ -695,7 +959,11 @@ async def export_report_pack_endpoint(
     try:
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
-        zip_bytes = export.export_report_pack(start_dt, end_dt)
+        zip_bytes = await asyncio.to_thread(
+            export.export_report_pack,
+            start_dt,
+            end_dt,
+        )
         filename = f"mwavuli_report_pack_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.zip"
         return Response(
             content=zip_bytes,
@@ -726,25 +994,41 @@ async def export_analytics(
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         
-        valid_types = ["risk_distribution", "county_analysis", "keyword_trends", "toxicity_trends"]
+        valid_types = [
+            "risk_distribution",
+            "county_analysis",
+            "keyword_trends",
+            "toxicity_trends",
+        ]
         if analytics_type not in valid_types:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid analytics_type. Must be one of: {', '.join(valid_types)}"
+                detail=(
+                    "Invalid analytics_type. Must be one of: "
+                    f"{', '.join(valid_types)}"
+                ),
             )
         
-        csv_data = export.export_analytics_to_csv(analytics_type, start_dt, end_dt)
+        csv_data = await asyncio.to_thread(
+            export.export_analytics_to_csv,
+            analytics_type,
+            start_dt,
+            end_dt,
+        )
         if not csv_data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="No data found for the specified analytics type and date range"
+                detail="No data found for the specified analytics type and date range",
             )
         
-        filename = f"mwavuli_analytics_{analytics_type}_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+        filename = (
+            f"mwavuli_analytics_{analytics_type}_"
+            f"{datetime.utcnow().strftime('%Y%m%d')}.csv"
+        )
         return StreamingResponse(
             iter([csv_data]),
             media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
     except ValueError as e:
         raise HTTPException(
@@ -775,12 +1059,16 @@ async def export_looker_studio(
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         
-        view_data = export.create_looker_studio_view(start_dt, end_dt)
+        view_data = await asyncio.to_thread(
+            export.create_looker_studio_view,
+            start_dt,
+            end_dt,
+        )
         
         if not view_data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="No data found for the specified date range"
+                detail="No data found for the specified date range",
             )
         
         return JSONResponse(content=view_data)

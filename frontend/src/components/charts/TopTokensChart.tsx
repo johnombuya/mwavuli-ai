@@ -5,36 +5,37 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { analyticsApi } from '@/lib/api';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 
-interface KeywordTrendsChartProps {
+interface TopTokensChartProps {
   dateRange?: { start_date?: string; end_date?: string };
 }
 
-export function KeywordTrendsChart({ dateRange }: KeywordTrendsChartProps) {
+export function TopTokensChart({ dateRange }: TopTokensChartProps) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ['analytics', 'keyword-trends', dateRange],
-    queryFn: () => analyticsApi.getKeywordTrends({ limit: 10, ...dateRange }),
+    queryKey: ['analytics', 'top-tokens', dateRange],
+    queryFn: () => analyticsApi.getTopTokens({ limit: 15, risk_levels: 'HIGH', ...dateRange }),
   });
 
   if (isLoading) return <LoadingSpinner />;
   if (error) return <div className="text-red-600">Error loading data</div>;
-  if (!data || data.keywords.length === 0) {
+  if (!data || data.tokens.length === 0) {
     return (
       <div className="text-gray-500">
-        No lexicon keyword data yet. Lexicon trends update when reports match high-risk keywords.
+        No token trends yet. This chart updates from the words used in recent high-risk reports.
       </div>
     );
   }
 
   return (
     <ResponsiveContainer width="100%" height={300}>
-      <BarChart data={data.keywords} layout="vertical">
+      <BarChart data={data.tokens} layout="vertical">
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis type="number" />
-        <YAxis dataKey="keyword" type="category" width={140} />
+        <YAxis dataKey="token" type="category" width={140} />
         <Tooltip />
         <Legend />
-        <Bar dataKey="count" fill="#0284c7" name="Lexicon hits" />
+        <Bar dataKey="count" fill="#16a34a" name="Token frequency" />
       </BarChart>
     </ResponsiveContainer>
   );
 }
+
