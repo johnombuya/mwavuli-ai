@@ -203,9 +203,18 @@ niru_mwavuli/
 ### Verification
 
 - `POST /api/v1/verify/text` - Verify text content
-- `POST /api/v1/verify/media` - Verify media content (placeholder)
+- `POST /api/v1/verify/media` - Verify media content (image via Gemini Vision; video/audio placeholder)
+
+### Reports & Appeals
+
+- `PATCH /api/v1/reports/{report_id}` - Update report status (pending/reviewed/escalated)
+- `POST /api/v1/reports/{report_id}/appeal` - Submit appeal
+- `GET /api/v1/reports/appeals` - List appeals (filter by status, report_id)
+- `POST /api/v1/reports/appeals/{appeal_id}/resolve` - Resolve appeal (upheld/overturned)
 
 ### Analytics
+
+All analytics endpoints accept optional `sector` and `org_id` query parameters.
 
 - `GET /api/v1/analytics/summary` - Overall statistics
 - `GET /api/v1/analytics/risk-distribution` - Risk level breakdown
@@ -216,11 +225,20 @@ niru_mwavuli/
 - `GET /api/v1/analytics/daily-patterns` - Day-of-week patterns
 - `GET /api/v1/analytics/detection-comparison` - Lexicon vs Gemini
 - `GET /api/v1/analytics/geographic-heatmap` - County risk map
+- `GET /api/v1/analytics/national-risk-level` - Traffic-light risk indicator
+- `GET /api/v1/analytics/daily-summary` - Natural language 24 h summary
+- `GET /api/v1/analytics/coordinated-campaigns` - Flagged coordinated activity
+
+### Admin
+
+- `GET /api/v1/admin/emergency-mode` - Check emergency mode status
+- `POST /api/v1/admin/emergency-mode` - Toggle emergency mode
 
 ### Export
 
 - `GET /api/v1/export/reports` - Export raw reports (CSV/JSON)
 - `GET /api/v1/export/analytics` - Export aggregated analytics
+- `GET /api/v1/export/stix` - Export HIGH-risk reports as STIX 2.1 bundle
 - `GET /api/v1/export/looker-studio` - Optimized export for Looker Studio
 
 ### System
@@ -339,11 +357,61 @@ ports:
 
 **Volume Mount Issues**: Ensure file permissions are correct.
 
+## Operations / Runbook
+
+### Purge expired reports
+
+Data retention is controlled by `DATA_RETENTION_DAYS` (default 365). Run the purge script periodically (e.g. weekly via cron):
+
+```bash
+cd backend
+python scripts/purge_expired_reports.py          # delete expired reports
+python scripts/purge_expired_reports.py --dry-run # preview only
+```
+
+### Early warning alerts
+
+The alert script checks the last 24 hours of HIGH-risk reports against `ALERT_HIGH_RISK_THRESHOLD` and POSTs to `ALERT_WEBHOOK_URL`:
+
+```bash
+cd backend
+python scripts/run_alerts.py   # suggest running every 15 min via cron
+```
+
+### Emergency mode
+
+Toggle at runtime (requires admin API key):
+
+```bash
+# Enable
+curl -X POST "https://your-host/api/v1/admin/emergency-mode?enable=true" -H "X-API-Key: YOUR_ADMIN_KEY"
+
+# Disable
+curl -X POST "https://your-host/api/v1/admin/emergency-mode?enable=false" -H "X-API-Key: YOUR_ADMIN_KEY"
+```
+
+When active, alert thresholds are halved and the dashboard refreshes every 30 seconds with a prominent red banner.
+
+### Media verification
+
+Image verification uses Gemini Vision. Video and audio are placeholders and return a generic MEDIUM-risk response pending future implementation.
+
+### Bias testing
+
+Run the ethnic-balance bias test framework:
+
+```bash
+cd backend
+python scripts/bias_test.py
+```
+
 ## Security Notes
 
 - **Never commit** `.env`, `.env.local`, or `firebase-service-account.json` to git
-- Rotate Firebase credentials if accidentally exposed
-- Keep API keys secure and rotate regularly
+- Set `SENDER_HASH_SALT` to a long random string in production
+- Set `API_KEYS` and `API_KEY_ROLES` to restrict API access
+- Configure `FRONTEND_URL` for CORS in production
+- Rotate Firebase and Gemini credentials if accidentally exposed
 - Use environment variables for all sensitive data in production
 - Configure CORS appropriately for production (update `ALLOWED_ORIGINS` in `backend/app/main.py`)
 

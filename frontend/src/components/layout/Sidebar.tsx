@@ -9,6 +9,8 @@ import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 const navItems = [
   { href: '/', labelKey: 'dashboardTitle' },
   { href: '/verify', labelKey: 'navVerify' },
+  { href: '/appeals', label: 'Appeals' },
+  { href: '/admin/audit', label: 'Audit log' },
   { href: '/methodology', label: 'How it works' },
   { href: '/integrate', label: 'Integrate' },
 ] as const;

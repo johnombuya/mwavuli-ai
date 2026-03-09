@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { analyticsApi } from '@/lib/api';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { analyticsApi, reportsApi } from '@/lib/api';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import type { RecentReport } from '@/types/api';
 
@@ -17,11 +17,27 @@ const RISK_COLORS: Record<string, string> = {
   LOW: 'text-green-600',
 };
 
+const ACTION_BUTTONS: { status: string; label: string; cls: string }[] = [
+  { status: 'reviewed', label: 'Mark reviewed', cls: 'text-blue-700 hover:bg-blue-50' },
+  { status: 'escalated', label: 'Escalate', cls: 'text-red-700 hover:bg-red-50' },
+  { status: 'pending', label: 'Reopen', cls: 'text-amber-700 hover:bg-amber-50' },
+];
+
 export function RecentReports() {
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>('');
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'recent', statusFilter],
     queryFn: () => analyticsApi.getRecentReports({ limit: 15, status: statusFilter || undefined }),
+  });
+
+  const mutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      reportsApi.updateStatus(id, status),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'recent'] });
+    },
   });
 
   if (isLoading) return <LoadingSpinner />;
@@ -43,7 +59,7 @@ export function RecentReports() {
           <option value="escalated">Escalated</option>
         </select>
       </div>
-      <ul className="space-y-2 max-h-64 overflow-y-auto">
+      <ul className="space-y-2 max-h-[28rem] overflow-y-auto">
         {data.reports.map((r: RecentReport) => {
           const risk = r.risk_level || 'UNKNOWN';
           const status = r.status || 'pending';
@@ -51,9 +67,9 @@ export function RecentReports() {
 
           return (
             <li key={r.id} className="bg-white border border-gray-200 rounded p-3 text-sm">
-              <p className="text-gray-900 line-clamp-2">{r.text || '—'}</p>
+              <p className="text-gray-900 line-clamp-2">{r.text || '\u2014'}</p>
               <div className="mt-2 flex flex-wrap items-center gap-2 justify-between">
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 items-center">
                   <span className={RISK_COLORS[risk] || 'text-gray-600'}>{risk}</span>
                   <span
                     className={`rounded px-1.5 py-0.5 text-xs font-medium ${
@@ -62,10 +78,28 @@ export function RecentReports() {
                   >
                     {status}
                   </span>
+                  {(r as any).recommended_action && (
+                    <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-indigo-50 text-indigo-700">
+                      {(r as any).recommended_action}
+                    </span>
+                  )}
                 </div>
                 {timestampLabel && (
                   <span className="text-xs text-gray-500">{timestampLabel}</span>
                 )}
+              </div>
+              {/* Moderation actions */}
+              <div className="mt-2 flex gap-1 border-t border-gray-100 pt-2">
+                {ACTION_BUTTONS.filter((a) => a.status !== status).map((a) => (
+                  <button
+                    key={a.status}
+                    disabled={mutation.isPending}
+                    onClick={() => mutation.mutate({ id: r.id, status: a.status })}
+                    className={`rounded px-2 py-1 text-xs font-medium transition-colors ${a.cls}`}
+                  >
+                    {a.label}
+                  </button>
+                ))}
               </div>
             </li>
           );

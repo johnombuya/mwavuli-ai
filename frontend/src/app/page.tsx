@@ -11,9 +11,14 @@ import { CountyHeatmap } from '@/components/dashboard/CountyHeatmap';
 import { RecentReports } from '@/components/dashboard/RecentReports';
 import { DateRangePicker } from '@/components/ui/DateRangePicker';
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { DetectionRiskChart } from '@/components/charts/DetectionRiskChart';
 import { ConfidenceHistogramChart } from '@/components/charts/ConfidenceHistogramChart';
 import { UrlMentionRiskChart } from '@/components/charts/UrlMentionRiskChart';
+import { NationalRiskIndicator } from '@/components/dashboard/NationalRiskIndicator';
+import { DailySummaryCard } from '@/components/dashboard/DailySummaryCard';
+import { CoordinatedCampaignsWidget } from '@/components/dashboard/CoordinatedCampaignsWidget';
+import { adminApi } from '@/lib/api';
 
 const chartCardClass =
   'bg-white rounded-xl border border-slate-200/60 shadow-sm p-6';
@@ -24,11 +29,26 @@ export default function DashboardPage() {
   const [dateRange, setDateRange] = useState<{
     start_date?: string;
     end_date?: string;
+    sector?: string;
+    org_id?: string;
   }>({});
+
+  const { data: emData } = useQuery({
+    queryKey: ['admin', 'emergency-mode'],
+    queryFn: () => adminApi.getEmergencyMode(),
+    refetchInterval: 30_000,
+  });
+  const isEmergency = emData?.emergency_mode === true;
 
   return (
     <div className="p-6 md:p-8">
       <div className="max-w-7xl mx-auto">
+        {isEmergency && (
+          <div className="mb-4 rounded-xl bg-red-600 text-white px-5 py-3 font-semibold text-center shadow-lg animate-pulse">
+            EMERGENCY MODE ACTIVE &mdash; Dashboards refreshing every 30 s, alert thresholds lowered.
+          </div>
+        )}
+
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">
             {t.dashboardTitle}
@@ -38,13 +58,24 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Date Range Picker and Export */}
+        {/* Date Range Picker, Sector filter, and Export */}
         <div className="mb-6 flex flex-wrap items-center gap-4">
           <DateRangePicker
-            onDateChange={setDateRange}
+            onDateChange={(dr) => setDateRange((prev) => ({ ...prev, ...dr }))}
             startDate={dateRange.start_date}
             endDate={dateRange.end_date}
           />
+          <select
+            value={dateRange.sector || ''}
+            onChange={(e) => setDateRange((prev) => ({ ...prev, sector: e.target.value || undefined }))}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+          >
+            <option value="">All sectors</option>
+            <option value="political">Political</option>
+            <option value="health">Health</option>
+            <option value="security">Security</option>
+            <option value="fraud">Fraud</option>
+          </select>
           <a
             href={`/api/v1/export/report-pack${dateRange.start_date || dateRange.end_date ? '?' + new URLSearchParams({
               ...(dateRange.start_date && { start_date: dateRange.start_date }),
@@ -55,6 +86,12 @@ export default function DashboardPage() {
           >
             Export report pack
           </a>
+        </div>
+
+        {/* National Risk Indicator + Daily Summary */}
+        <div className="mb-6 space-y-4">
+          <NationalRiskIndicator />
+          <DailySummaryCard />
         </div>
 
         {/* Summary Cards */}
@@ -108,6 +145,10 @@ export default function DashboardPage() {
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>Recent reports</h2>
             <RecentReports />
+          </div>
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>Coordinated campaigns</h2>
+            <CoordinatedCampaignsWidget />
           </div>
         </div>
       </div>

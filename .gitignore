@@ -15,8 +15,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -55,6 +55,9 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Data files (large datasets)
+*.csv
 
 # Model cache (can be large)
 .cache/

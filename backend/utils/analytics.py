@@ -24,15 +24,15 @@ def _get_reports_collection():
     return ref
 
 
-def _build_date_filter(start_date: Optional[datetime] = None, 
-                       end_date: Optional[datetime] = None):
+def _build_date_filter(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    sector: Optional[str] = None,
+    org_id: Optional[str] = None,
+):
     """
-    Build Firestore query with date filtering.
+    Build Firestore query with date, sector, and org_id filtering.
     
-    Args:
-        start_date: Start date for filtering
-        end_date: End date for filtering
-        
     Returns:
         Tuple of (query_ref, has_filters)
     """
@@ -47,12 +47,20 @@ def _build_date_filter(start_date: Optional[datetime] = None,
     
     if end_date:
         query_ref = query_ref.where("timestamp", "<=", end_date)
+
+    if sector:
+        query_ref = query_ref.where("sector", "==", sector)
+
+    if org_id:
+        query_ref = query_ref.where("org_id", "==", org_id)
     
-    return query_ref, bool(start_date or end_date)
+    return query_ref, bool(start_date or end_date or sector or org_id)
 
 
 def get_risk_level_distribution(start_date: Optional[datetime] = None,
-                                end_date: Optional[datetime] = None) -> Dict[str, int]:
+                                end_date: Optional[datetime] = None,
+                                sector: Optional[str] = None,
+                                org_id: Optional[str] = None) -> Dict[str, int]:
     """
     Get distribution of risk levels over time period.
     
@@ -63,7 +71,7 @@ def get_risk_level_distribution(start_date: Optional[datetime] = None,
     Returns:
         Dictionary with risk level counts: {"HIGH": 10, "MEDIUM": 5, "LOW": 20}
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}
     
@@ -83,7 +91,9 @@ def get_risk_level_distribution(start_date: Optional[datetime] = None,
 
 def get_county_risk_analysis(county: Optional[str] = None,
                               start_date: Optional[datetime] = None,
-                              end_date: Optional[datetime] = None) -> Dict:
+                              end_date: Optional[datetime] = None,
+                              sector: Optional[str] = None,
+                              org_id: Optional[str] = None) -> Dict:
     """
     Analyze risk levels by county.
     
@@ -95,7 +105,7 @@ def get_county_risk_analysis(county: Optional[str] = None,
     Returns:
         Dictionary with county-level risk analysis
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return {}
     
@@ -132,7 +142,9 @@ def get_county_risk_analysis(county: Optional[str] = None,
 
 def get_keyword_trends(limit: int = 20,
                       start_date: Optional[datetime] = None,
-                      end_date: Optional[datetime] = None) -> List[Dict]:
+                      end_date: Optional[datetime] = None,
+                      sector: Optional[str] = None,
+                      org_id: Optional[str] = None) -> List[Dict]:
     """
     Get most frequently matched keywords.
     
@@ -144,7 +156,7 @@ def get_keyword_trends(limit: int = 20,
     Returns:
         List of dictionaries with keyword and count: [{"keyword": "madoadoa", "count": 15}, ...]
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return []
     
@@ -171,7 +183,9 @@ def get_keyword_trends(limit: int = 20,
 
 def get_toxicity_trends(days: int = 30,
                         start_date: Optional[datetime] = None,
-                        end_date: Optional[datetime] = None) -> List[Dict]:
+                        end_date: Optional[datetime] = None,
+                        sector: Optional[str] = None,
+                        org_id: Optional[str] = None) -> List[Dict]:
     """
     Get average toxicity scores over time.
     
@@ -183,16 +197,15 @@ def get_toxicity_trends(days: int = 30,
     Returns:
         List of dictionaries with date and average toxicity: [{"date": "2024-01-01", "avg_toxicity": 0.65}, ...]
     """
-    query_ref, has_filters = _build_date_filter(start_date, end_date)
+    query_ref, has_filters = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return []
     
     try:
-        # Set default date range if not provided
         if not has_filters:
             end_date = datetime.utcnow()
             start_date = end_date - timedelta(days=days)
-            query_ref, _ = _build_date_filter(start_date, end_date)
+            query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
         
         # Group by date
         daily_scores = defaultdict(list)
@@ -230,7 +243,9 @@ def get_toxicity_trends(days: int = 30,
 
 
 def get_hourly_patterns(start_date: Optional[datetime] = None,
-                       end_date: Optional[datetime] = None) -> Dict:
+                       end_date: Optional[datetime] = None,
+                       sector: Optional[str] = None,
+                       org_id: Optional[str] = None) -> Dict:
     """
     Analyze when high-risk content is most common by hour.
     
@@ -241,7 +256,7 @@ def get_hourly_patterns(start_date: Optional[datetime] = None,
     Returns:
         Dictionary with hourly risk distribution: {"0": {"HIGH": 5, "MEDIUM": 3, ...}, ...}
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return {}
     
@@ -276,7 +291,9 @@ def get_hourly_patterns(start_date: Optional[datetime] = None,
 
 
 def get_daily_patterns(start_date: Optional[datetime] = None,
-                      end_date: Optional[datetime] = None) -> Dict:
+                      end_date: Optional[datetime] = None,
+                      sector: Optional[str] = None,
+                      org_id: Optional[str] = None) -> Dict:
     """
     Analyze risk distribution by day of week.
     
@@ -287,7 +304,7 @@ def get_daily_patterns(start_date: Optional[datetime] = None,
     Returns:
         Dictionary with day-of-week risk distribution
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return {}
     
@@ -321,7 +338,9 @@ def get_daily_patterns(start_date: Optional[datetime] = None,
 
 
 def get_gemini_vs_lexicon_comparison(start_date: Optional[datetime] = None,
-                                    end_date: Optional[datetime] = None) -> Dict:
+                                    end_date: Optional[datetime] = None,
+                                    sector: Optional[str] = None,
+                                    org_id: Optional[str] = None) -> Dict:
     """
     Compare Gemini-detected vs lexicon-detected high-risk content.
     
@@ -332,7 +351,7 @@ def get_gemini_vs_lexicon_comparison(start_date: Optional[datetime] = None,
     Returns:
         Dictionary with comparison statistics
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return {}
     
@@ -381,7 +400,9 @@ def get_gemini_vs_lexicon_comparison(start_date: Optional[datetime] = None,
 
 
 def get_geographic_heatmap(start_date: Optional[datetime] = None,
-                          end_date: Optional[datetime] = None) -> Dict:
+                          end_date: Optional[datetime] = None,
+                          sector: Optional[str] = None,
+                          org_id: Optional[str] = None) -> Dict:
     """
     Get county-level risk aggregation for heatmap visualization.
     
@@ -392,7 +413,7 @@ def get_geographic_heatmap(start_date: Optional[datetime] = None,
     Returns:
         Dictionary with county-level risk data
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return {}
     
@@ -450,7 +471,9 @@ def get_geographic_heatmap(start_date: Optional[datetime] = None,
 
 
 def get_summary_stats(start_date: Optional[datetime] = None,
-                     end_date: Optional[datetime] = None) -> Dict:
+                     end_date: Optional[datetime] = None,
+                     sector: Optional[str] = None,
+                     org_id: Optional[str] = None) -> Dict:
     """
     Get overall statistics summary.
     
@@ -461,7 +484,7 @@ def get_summary_stats(start_date: Optional[datetime] = None,
     Returns:
         Dictionary with summary statistics
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         print("[analytics] get_summary_stats: query_ref is None, returning zeros")
         return {
@@ -541,7 +564,9 @@ def get_summary_stats(start_date: Optional[datetime] = None,
 
 def get_anomalies(start_date: Optional[datetime] = None,
                  end_date: Optional[datetime] = None,
-                 threshold: float = 2.0) -> List[Dict]:
+                 threshold: float = 2.0,
+                 sector: Optional[str] = None,
+                 org_id: Optional[str] = None) -> List[Dict]:
     """
     Detect unusual spikes or patterns in reports.
     
@@ -553,7 +578,7 @@ def get_anomalies(start_date: Optional[datetime] = None,
     Returns:
         List of detected anomalies
     """
-    query_ref, has_filters = _build_date_filter(start_date, end_date)
+    query_ref, has_filters = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return []
 
@@ -562,13 +587,15 @@ def get_top_tokens(limit: int = 20,
                    start_date: Optional[datetime] = None,
                    end_date: Optional[datetime] = None,
                    risk_levels: Optional[List[str]] = None,
-                   min_length: int = 4) -> List[Dict]:
+                   min_length: int = 4,
+                   sector: Optional[str] = None,
+                   org_id: Optional[str] = None) -> List[Dict]:
     """
     Get most frequent tokens from high-risk reports.
 
     This is a heuristic text-based trend separate from lexicon keywords.
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return []
 
@@ -643,11 +670,13 @@ def get_top_tokens(limit: int = 20,
 def get_detection_method_risk_matrix(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    sector: Optional[str] = None,
+    org_id: Optional[str] = None,
 ) -> Dict:
     """
     Aggregate counts by detection_method and risk_level.
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return {}
 
@@ -674,11 +703,13 @@ def get_confidence_histogram(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     bucket_size: float = 0.1,
+    sector: Optional[str] = None,
+    org_id: Optional[str] = None,
 ) -> List[Dict]:
     """
     Build histogram of confidence_score across reports.
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return []
 
@@ -712,11 +743,13 @@ def get_confidence_histogram(
 def get_url_mention_risk_stats(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    sector: Optional[str] = None,
+    org_id: Optional[str] = None,
 ) -> Dict:
     """
     Compare risk distributions for reports with/without URLs and mentions.
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return {}
 
@@ -751,14 +784,86 @@ def get_url_mention_risk_stats(
         return {}
 
 
+def get_keyword_baseline(keyword: str, days: int = 30) -> float:
+    """Return average daily count of *keyword* over the last *days* days."""
+    end_dt = datetime.utcnow()
+    start_dt = end_dt - timedelta(days=days)
+    query_ref, _ = _build_date_filter(start_dt, end_dt)
+    if query_ref is None:
+        return 0.0
+    try:
+        count = 0
+        for doc in query_ref.stream():
+            if doc.to_dict().get("matched_keyword") == keyword:
+                count += 1
+        return count / max(days, 1)
+    except Exception:
+        return 0.0
+
+
+def get_coordinated_campaigns(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> List[Dict]:
+    """Return reports flagged as coordinated campaigns."""
+    query_ref, _ = _build_date_filter(start_date, end_date)
+    if query_ref is None:
+        return []
+    try:
+        results = []
+        for doc in query_ref.stream():
+            data = doc.to_dict()
+            if data.get("coordinated_campaign"):
+                results.append({"id": doc.id, **data})
+        return results
+    except Exception as e:
+        print(f"Error getting coordinated campaigns: {e}")
+        return []
+
+
+def get_national_risk_level(
+    window_hours: int = 24,
+    high_threshold_pct: float = 15.0,
+    medium_threshold_pct: float = 30.0,
+) -> Dict:
+    """
+    Compute a traffic-light national risk indicator.
+
+    Returns ``{"level": "RED"|"AMBER"|"GREEN", "high_pct": float, ...}``.
+    """
+    end_dt = datetime.utcnow()
+    start_dt = end_dt - timedelta(hours=window_hours)
+    dist = get_risk_level_distribution(start_dt, end_dt)
+    total = sum(dist.values()) or 1
+    high_pct = dist.get("HIGH", 0) / total * 100
+    medium_pct = dist.get("MEDIUM", 0) / total * 100
+
+    if high_pct >= high_threshold_pct:
+        level = "RED"
+    elif medium_pct >= medium_threshold_pct:
+        level = "AMBER"
+    else:
+        level = "GREEN"
+
+    return {
+        "level": level,
+        "high_pct": round(high_pct, 1),
+        "medium_pct": round(medium_pct, 1),
+        "total_reports": total,
+        "window_hours": window_hours,
+    }
+
+
 def get_status_counts(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    sector: Optional[str] = None,
+    org_id: Optional[str] = None,
 ) -> Dict:
     """
     Count reports by moderation status.
     """
-    query_ref, _ = _build_date_filter(start_date, end_date)
+    query_ref, _ = _build_date_filter(start_date, end_date, sector=sector, org_id=org_id)
     if query_ref is None:
         return {}
 

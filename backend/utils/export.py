@@ -101,7 +101,7 @@ def _flatten_report(report: Dict[str, Any]) -> Dict[str, Any]:
         flattened["max_toxicity"] = 0.0
     
     # Anonymized sender hash
-    flattened["sender_hash"] = report.get("sender_hash", "")
+    flattened["sender_hash"] = "[REDACTED]"
     
     return flattened
 

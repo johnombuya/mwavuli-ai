@@ -3,7 +3,7 @@ Import edwardombui/hatespeech-kenya from Kaggle into Mwavuli by POSTing each row
 to POST /api/v1/verify/text. Backend runs the full pipeline and saves reports.
 
 Run from backend root with the API server running, e.g.:
-  python scripts/import_kaggle_hatespeech.py [--limit N] [--dry-run] [--delay SECS]
+  python scripts/import_kaggle_hatespeech.py [--skip N] [--limit N] [--dry-run] [--delay SECS]
 
 Requires: kagglehub, pandas. Start API first (e.g. uvicorn app.main:app).
 """
@@ -109,10 +109,16 @@ def main() -> int:
         help="Mwavuli API base URL (default: MWAVULI_API_URL or localhost:8000)",
     )
     parser.add_argument(
+        "--skip",
+        type=int,
+        default=0,
+        help="Number of rows to skip from the start (default: 0)",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=None,
-        help="Max number of rows to import (default: all)",
+        help="Max number of rows to import after skipping (default: all)",
     )
     parser.add_argument(
         "--dry-run",
@@ -145,11 +151,11 @@ def main() -> int:
         return 1
 
     sep = "\t" if filepath.endswith(".tsv") else ","
-    nrows = args.limit
+    read_limit = (args.skip + args.limit) if args.limit else None
     df = pd.read_csv(
         filepath,
         sep=sep,
-        nrows=nrows,
+        nrows=read_limit,
         encoding="utf-8",
         on_bad_lines="skip",
     )
@@ -159,6 +165,10 @@ def main() -> int:
     df = df.dropna(subset=[text_col])
     df[text_col] = df[text_col].astype(str).apply(normalize_tweet_text)
     df = df[df[text_col].str.len() > 0]
+
+    if args.skip > 0:
+        df = df.iloc[args.skip:]
+        print(f"Skipped first {args.skip} rows")
 
     print(f"Text column: {text_col}, County column: {county_col or 'none'}")
     print(f"Columns: {list(df.columns)}")

@@ -12,22 +12,33 @@ export default function MethodologyPage() {
           How Mwavuli works
         </h1>
         <p className="text-slate-600 mb-8">
-          The content verification and analytics engine for safer Kenyan elections.
+          The content verification and analytics engine for national resilience.
         </p>
 
         <section className={`${cardClass} mb-6`}>
           <h2 className="text-xl font-semibold text-slate-900 mb-3">Detection pipeline</h2>
           <p className="text-slate-700 mb-2">
-            Mwavuli combines three layers to assess text for harmful or misleading content in the Kenyan political context:
+            Mwavuli combines four layers to assess text for harmful or misleading content. The pipeline supports multiple sectors (political, health, security, fraud).
           </p>
           <ol className="list-decimal list-inside space-y-2 text-slate-700">
-            <li><strong>Lexicon check</strong> — A curated list of high- and medium-risk keywords (hate speech, incitement, and local political terms) is matched first. Any match can immediately raise the risk level.</li>
-            <li><strong>Detoxify</strong> — A multilingual toxicity model scores the text across categories (e.g. toxicity, severe toxicity). High scores contribute to the overall risk level.</li>
-            <li><strong>Gemini</strong> — Google’s Gemini model is used for Kenyan-context analysis: it looks for subtle incitement or hate that may not be caught by keywords or toxicity alone. It also generates messages in English, Swahili, and Sheng.</li>
+            <li><strong>Sector-specific lexicon check</strong> — Curated keyword lists per sector (hate speech, incitement, misinformation, fraud). A high-risk match immediately raises the risk level.</li>
+            <li><strong>Detoxify</strong> — A multilingual toxicity model scores the text across categories (toxicity, severe toxicity, etc.).</li>
+            <li><strong>Kenyan risk classifier</strong> — A fine-tuned transformer (DistilBERT / XLM-R) trained on Kenyan political text provides an additional domain-specific risk signal.</li>
+            <li><strong>Gemini / Local LLM</strong> — Google Gemini (or a local Ollama model as fallback) checks for subtle incitement and provides translations in English, Swahili, and Sheng.</li>
           </ol>
           <p className="text-slate-700 mt-3">
-            The final risk level (HIGH, MEDIUM, LOW) is determined by combining these signals. When you see a result, the &quot;Why&quot; explanation summarizes which of these contributed.
+            The final risk level is determined by a <strong>weighted ensemble</strong> of all four signals. Each model casts a confidence vote, and the combined score determines HIGH, MEDIUM, or LOW. The explanation field shows exactly which models contributed.
           </p>
+        </section>
+
+        <section className={`${cardClass} mb-6`}>
+          <h2 className="text-xl font-semibold text-slate-900 mb-3">Model details</h2>
+          <ul className="space-y-3 text-slate-700 text-sm">
+            <li><strong>Lexicon</strong> — Hand-curated by Kenyan domain experts. Reviewed quarterly. Covers political, health, security, and fraud sectors.</li>
+            <li><strong>Detoxify</strong> — Open-source multilingual toxicity model. Trained primarily on English data; may underperform on Swahili/Sheng.</li>
+            <li><strong>Kenyan classifier</strong> — Fine-tuned on Firestore reports + Kaggle hatespeech-kenya dataset. Accuracy varies with training data size.</li>
+            <li><strong>Gemini / Ollama</strong> — General-purpose LLM. Context check is prompt-based; results are probabilistic, not deterministic.</li>
+          </ul>
         </section>
 
         <section className={`${cardClass} mb-6`}>
@@ -46,9 +57,16 @@ export default function MethodologyPage() {
         </section>
 
         <section className={`${cardClass} mb-6`}>
+          <h2 className="text-xl font-semibold text-slate-900 mb-3">Bias mitigation</h2>
+          <p className="text-slate-700 text-sm">
+            We run automated bias tests that swap ethnic group references in identical content to detect differential treatment. The lexicon undergoes quarterly human review with multi-community representation. An appeal mechanism allows users to challenge flagged content, and resolved appeals feed back into model retraining.
+          </p>
+        </section>
+
+        <section className={`${cardClass} mb-6`}>
           <h2 className="text-xl font-semibold text-slate-900 mb-3">Privacy and use</h2>
           <p className="text-slate-700">
-            Verifications are logged anonymously (e.g. a hash of the sender ID) for pattern analysis and improving the system. We do not store identifiable personal data. The public &quot;Verify before you share&quot; tool is intended for civic use and election peacebuilding.
+            Verifications are logged anonymously (salted hash of sender ID) for pattern analysis. PII (phone numbers, national IDs, emails) is automatically redacted before storage. This system is designed for harm reduction, not surveillance.
           </p>
         </section>
 

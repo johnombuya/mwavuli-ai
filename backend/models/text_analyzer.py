@@ -43,12 +43,24 @@ else:
 from dotenv import load_dotenv
 
 from utils.lexicon import check_lexicon, get_keyword_context
+from models import kenyan_classifier
 
 # Load environment variables
 load_dotenv()
 
 # Pre-bunking tip for all responses
 PREBUNKING_TIP = "For official election results, always visit iebc.or.ke"
+
+# Ollama / local LLM config
+_LOCAL_LLM_ENABLED = os.getenv("LOCAL_LLM_ENABLED", "false").lower() == "true"
+_OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "phi3:mini")
+
+# Ensemble confidence weights (configurable via env)
+_W_LEXICON = float(os.getenv("ENSEMBLE_W_LEXICON", "0.30"))
+_W_DETOXIFY = float(os.getenv("ENSEMBLE_W_DETOXIFY", "0.25"))
+_W_KENYAN = float(os.getenv("ENSEMBLE_W_KENYAN", "0.25"))
+_W_GEMINI = float(os.getenv("ENSEMBLE_W_GEMINI", "0.20"))
 
 
 @dataclass
@@ -60,7 +72,11 @@ class AnalysisResult:
     matched_keyword: Optional[str] = None
     gemini_context_flag: bool = False
     prebunking_tip: str = PREBUNKING_TIP
-    explanation: Optional[str] = None  # Human-readable reason for risk (for transparency)
+    explanation: Optional[str] = None
+    confidence_score: float = 0.0
+    kenyan_model_risk: Optional[str] = None
+    kenyan_model_score: Optional[float] = None
+    explanation_details: Optional[Dict] = None
 
 
 class MwavuliAnalyzer:
@@ -76,10 +92,13 @@ class MwavuliAnalyzer:
         print("Initializing MwavuliAnalyzer...")
         
         # Lazy loading - don't load Detoxify until first use
-        # This prevents startup failures if model download is corrupted
         self.detoxify_model = None
         self._detoxify_loading = False
         self._detoxify_error = None
+
+        # Gemini circuit breaker state
+        self._gemini_consecutive_failures = 0
+        self._gemini_circuit_open_until = 0.0  # epoch seconds
         
         # Initialize Gemini
         self._init_gemini()
@@ -118,6 +137,41 @@ class MwavuliAnalyzer:
             self.gemini_client = None
             self.gemini_model = None
     
+    def _gemini_available(self) -> bool:
+        """Return False if the Gemini circuit breaker is open."""
+        import time as _time
+        if self._gemini_circuit_open_until > _time.time():
+            return False
+        if self.gemini_client is None and self.gemini_model is None:
+            return False
+        return True
+
+    def _record_gemini_failure(self):
+        import time as _time
+        self._gemini_consecutive_failures += 1
+        if self._gemini_consecutive_failures >= 5:
+            self._gemini_circuit_open_until = _time.time() + 60
+            print("[circuit-breaker] Gemini circuit open for 60 s")
+
+    def _record_gemini_success(self):
+        self._gemini_consecutive_failures = 0
+
+    async def _call_ollama(self, prompt: str) -> Optional[str]:
+        """Call the local Ollama LLM; returns response text or None."""
+        if not _LOCAL_LLM_ENABLED:
+            return None
+        import urllib.request, json as _json
+        url = f"{_OLLAMA_BASE_URL}/api/generate"
+        body = _json.dumps({"model": _OLLAMA_MODEL, "prompt": prompt, "stream": False}).encode()
+        try:
+            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = _json.loads(resp.read().decode())
+                return data.get("response", "").strip()
+        except Exception as e:
+            print(f"[ollama] Error: {e}")
+            return None
+
     def _ensure_detoxify_loaded(self):
         """
         Lazy load Detoxify model on first use.
@@ -386,86 +440,108 @@ Respond with ONLY the translated text, nothing else."""
         else:  # LOW
             return "This message appears to be safe. However, always verify important claims from official sources."
     
-    async def analyze(self, text: str) -> AnalysisResult:
+    async def analyze(self, text: str, sector: str = "political") -> AnalysisResult:
         """
         Analyze text for toxicity and return a comprehensive result.
-        
-        This method:
-        1. First checks the lexicon for immediate high-risk keywords
-        2. Gets Detoxify toxicity scores
-        3. Uses Gemini for Kenyan context checking
-        4. Generates translated responses in English, Swahili, and Sheng
-        
-        Args:
-            text: The text to analyze
-            
-        Returns:
-            AnalysisResult with risk level, scores, and translated messages
+
+        Pipeline:
+        1. Sector-specific lexicon check
+        2. Detoxify toxicity scores
+        2.5. Kenyan fine-tuned classifier (if model artifact present)
+        3. Gemini (or Ollama fallback) context check
+        4. Weighted ensemble → final risk + confidence
+        5. Translation to English, Swahili, Sheng
         """
-        # Step 1: Check lexicon first (bypass model if high-risk keyword found)
-        is_flagged, matched_keyword, lexicon_risk = check_lexicon(text)
-        
-        if is_flagged and lexicon_risk == "HIGH":
-            # Immediate HIGH risk - bypass model scoring
-            english_msg = self._generate_response_message("HIGH", matched_keyword)
-            
-            messages = {"english": english_msg}
-            
-            # Still try to translate if Gemini is available
-            if self.gemini_client or self.gemini_model:
-                try:
-                    messages["swahili"] = await self._translate_message(english_msg, "Swahili")
-                    messages["sheng"] = await self._translate_message(english_msg, "Sheng (Kenyan urban slang)")
-                except Exception:
-                    messages["swahili"] = english_msg
-                    messages["sheng"] = english_msg
-            else:
-                messages["swahili"] = english_msg
-                messages["sheng"] = english_msg
-            
-            return AnalysisResult(
-                risk_level="HIGH",
-                scores={"lexicon_match": 1.0},
-                messages=messages,
-                matched_keyword=matched_keyword,
-                gemini_context_flag=False,
-                explanation=self._build_explanation("HIGH", matched_keyword, False, {"lexicon_match": 1.0}),
-            )
-        
-        # Step 2: Get Detoxify scores
+        # ---- Step 1: Lexicon ----
+        is_flagged, matched_keyword, lexicon_risk = check_lexicon(text, sector=sector)
+        lexicon_conf = 1.0 if lexicon_risk == "HIGH" else (0.7 if lexicon_risk == "MEDIUM" else 0.0)
+
+        # ---- Step 2: Detoxify ----
         scores = self._get_detoxify_scores(text)
         max_score = self._get_max_toxicity_score(scores)
-        risk_level = self._map_score_to_risk(max_score)
-        
-        # Step 3: Gemini context check for subtle incitement
+        detoxify_risk = self._map_score_to_risk(max_score)
+
+        # ---- Step 2.5: Kenyan classifier ----
+        kenyan_result = kenyan_classifier.predict(text)
+        kenyan_risk = kenyan_result[0] if kenyan_result else None
+        kenyan_conf = kenyan_result[1] if kenyan_result else 0.0
+
+        # ---- Step 3: Gemini context (with circuit breaker & Ollama fallback) ----
         gemini_flagged = False
-        if self.gemini_client or self.gemini_model:
+        if self._gemini_available():
             try:
-                gemini_flagged, gemini_reason = await self._check_kenyan_context(text)
-                if gemini_flagged:
-                    risk_level = "HIGH"  # Upgrade to HIGH if Gemini flags it
+                gemini_flagged, _ = await self._check_kenyan_context(text)
+                self._record_gemini_success()
             except Exception as e:
                 print(f"Gemini context check failed: {e}")
-        
-        # Consider lexicon medium risk
-        if is_flagged and lexicon_risk == "MEDIUM" and risk_level == "LOW":
+                self._record_gemini_failure()
+                ollama_resp = await self._call_ollama(
+                    f'Is this Kenyan political incitement? Answer JSON {{"flagged":true/false}}: "{text[:500]}"'
+                )
+                if ollama_resp and '"flagged": true' in ollama_resp.lower().replace(" ", ""):
+                    gemini_flagged = True
+        elif _LOCAL_LLM_ENABLED:
+            ollama_resp = await self._call_ollama(
+                f'Is this Kenyan political incitement? Answer JSON {{"flagged":true/false}}: "{text[:500]}"'
+            )
+            if ollama_resp and '"flagged": true' in ollama_resp.lower().replace(" ", ""):
+                gemini_flagged = True
+
+        gemini_conf = 0.9 if gemini_flagged else 0.0
+
+        # ---- Step 4: Ensemble ----
+        votes = {
+            "lexicon": lexicon_conf,
+            "detoxify": max_score,
+            "kenyan_model": kenyan_conf,
+            "gemini": gemini_conf,
+        }
+        confidence = (
+            _W_LEXICON * lexicon_conf
+            + _W_DETOXIFY * max_score
+            + _W_KENYAN * kenyan_conf
+            + _W_GEMINI * gemini_conf
+        )
+        confidence = min(1.0, confidence)
+
+        # Determine final risk from ensemble
+        risk_level = "LOW"
+        if (
+            lexicon_risk == "HIGH"
+            or detoxify_risk == "HIGH"
+            or kenyan_risk == "HIGH"
+            or gemini_flagged
+        ):
+            risk_level = "HIGH"
+        elif (
+            lexicon_risk == "MEDIUM"
+            or detoxify_risk == "MEDIUM"
+            or kenyan_risk == "MEDIUM"
+        ):
             risk_level = "MEDIUM"
-        
-        # Step 4: Generate response messages
+
+        # ---- Step 5: Messages ----
         english_msg = self._generate_response_message(risk_level, matched_keyword)
-        
         messages = {"english": english_msg}
-        
-        # Translate messages
-        if self.gemini_client or self.gemini_model:
+
+        translated = False
+        if self._gemini_available():
             try:
                 messages["swahili"] = await self._translate_message(english_msg, "Swahili")
                 messages["sheng"] = await self._translate_message(english_msg, "Sheng (Kenyan urban slang)")
+                translated = True
+                self._record_gemini_success()
             except Exception:
-                messages["swahili"] = english_msg
-                messages["sheng"] = english_msg
-        else:
-            # Fallback translations when Gemini is not available
+                self._record_gemini_failure()
+
+        if not translated and _LOCAL_LLM_ENABLED:
+            sw = await self._call_ollama(f"Translate to Swahili: {english_msg}")
+            sh = await self._call_ollama(f"Translate to Kenyan Sheng: {english_msg}")
+            messages["swahili"] = sw or english_msg
+            messages["sheng"] = sh or english_msg
+            translated = True
+
+        if not translated:
             if risk_level == "HIGH":
                 messages["swahili"] = "Onyo: Ujumbe huu una maudhui hatari yanayoweza kuchochea chuki. Tafadhali hakiki habari kutoka vyanzo rasmi."
                 messages["sheng"] = "Heads up: Message iko na vitu mbaya sana. Confirm kwanza na official sources kabla ya ku-share."
@@ -475,7 +551,15 @@ Respond with ONLY the translated text, nothing else."""
             else:
                 messages["swahili"] = "Ujumbe huu unaonekana salama. Hata hivyo, hakiki madai muhimu kutoka vyanzo rasmi."
                 messages["sheng"] = "Message inaonekana poa. Lakini bado confirm important stuff na official sources."
-        
+
+        explanation_details = {
+            "lexicon": {"keyword": matched_keyword, "risk": lexicon_risk, "confidence": lexicon_conf},
+            "detoxify": {"max_score": round(max_score, 3), "risk": detoxify_risk},
+            "kenyan_model": {"risk": kenyan_risk, "confidence": round(kenyan_conf, 3)} if kenyan_result else None,
+            "gemini": {"flagged": gemini_flagged, "confidence": gemini_conf},
+            "final_confidence": round(confidence, 3),
+        }
+
         return AnalysisResult(
             risk_level=risk_level,
             scores=scores,
@@ -483,6 +567,10 @@ Respond with ONLY the translated text, nothing else."""
             matched_keyword=matched_keyword,
             gemini_context_flag=gemini_flagged,
             explanation=self._build_explanation(risk_level, matched_keyword, gemini_flagged, scores),
+            confidence_score=round(confidence, 3),
+            kenyan_model_risk=kenyan_risk,
+            kenyan_model_score=round(kenyan_conf, 3) if kenyan_result else None,
+            explanation_details=explanation_details,
         )
     
     def analyze_sync(self, text: str) -> AnalysisResult:

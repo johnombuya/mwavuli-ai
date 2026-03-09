@@ -17,6 +17,8 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
 
+from utils.redact import redact_pii
+
 # Load environment variables from backend/.env only
 _backend_root = Path(__file__).resolve().parent.parent
 load_dotenv(_backend_root / ".env")
@@ -80,17 +82,17 @@ def _get_db():
         return None
 
 
+_SENDER_HASH_SALT = os.getenv("SENDER_HASH_SALT", "")
+
+
 def _anonymize_sender(sender_id: str) -> str:
     """
-    Create an anonymized hash of the sender ID for privacy.
+    Create a salted, anonymized hash of the sender ID for privacy.
     
-    Args:
-        sender_id: The original sender identifier
-        
-    Returns:
-        A SHA-256 hash of the sender ID
+    Uses SENDER_HASH_SALT env var to prevent rainbow-table attacks.
     """
-    return hashlib.sha256(sender_id.encode()).hexdigest()[:16]
+    salted = _SENDER_HASH_SALT + sender_id
+    return hashlib.sha256(salted.encode()).hexdigest()[:16]
 
 
 # Kenyan counties mapped to regions
@@ -301,7 +303,7 @@ def save_report(data: dict) -> Optional[str]:
         
         # Build the anonymized report document
         report = {
-            "text": data.get("text", ""),
+            "text": redact_pii(data.get("text", "")),
             "risk_level": data.get("risk_level", "UNKNOWN"),
             "language": data.get("language", "unknown"),
             "county": data.get("county", "unknown"),
@@ -354,6 +356,22 @@ def save_report(data: dict) -> Optional[str]:
             report["ingestion_job_id"] = data["ingestion_job_id"]
         if "explanation" in data:
             report["explanation"] = data["explanation"]
+        if "explanation_details" in data:
+            report["explanation_details"] = data["explanation_details"]
+        if "confidence_score" in data:
+            report["confidence_score"] = data["confidence_score"]
+        if "kenyan_model_risk" in data:
+            report["kenyan_model_risk"] = data["kenyan_model_risk"]
+        if "kenyan_model_score" in data:
+            report["kenyan_model_score"] = data["kenyan_model_score"]
+        if data.get("coordinated_campaign"):
+            report["coordinated_campaign"] = True
+        if data.get("recommended_action"):
+            report["recommended_action"] = data["recommended_action"]
+        # Sector and org for multi-sector / multi-tenant support
+        report["sector"] = data.get("sector", "political")
+        if data.get("org_id"):
+            report["org_id"] = data["org_id"]
         # Default status for moderation workflow (pending / reviewed / escalated)
         report["status"] = data.get("status", "pending")
         
@@ -369,6 +387,31 @@ def save_report(data: dict) -> Optional[str]:
     except Exception as e:
         print(f"Error saving report to Firestore: {e}")
         return None
+
+
+def detect_coordinated_activity(
+    sender_hash: str,
+    window_minutes: int = 60,
+    threshold: int = 10,
+) -> bool:
+    """Return True if *sender_hash* has >= *threshold* reports in the last *window_minutes*."""
+    db = _get_db()
+    if db is None:
+        return False
+    try:
+        cutoff = datetime.utcnow() - __import__("datetime").timedelta(minutes=window_minutes)
+        ref = (
+            db.collection("artifacts")
+            .document("mwavuli")
+            .collection("public")
+            .document("data")
+            .collection("reports")
+        )
+        query = ref.where("sender_hash", "==", sender_hash).where("timestamp", ">=", cutoff).limit(threshold)
+        return len(list(query.stream())) >= threshold
+    except Exception as e:
+        print(f"Error in coordinated detection: {e}")
+        return False
 
 
 def report_exists_by_source_url(source_url: str) -> bool:
@@ -441,6 +484,35 @@ def get_report(report_id: str) -> Optional[dict]:
     except Exception as e:
         print(f"Error retrieving report: {e}")
         return None
+
+
+_VALID_STATUSES = {"pending", "reviewed", "escalated"}
+
+
+def update_report_status(report_id: str, new_status: str) -> bool:
+    """Update a report's moderation status. Returns True on success."""
+    if new_status not in _VALID_STATUSES:
+        return False
+    db = _get_db()
+    if db is None:
+        return False
+    try:
+        doc_ref = (
+            db.collection("artifacts")
+            .document("mwavuli")
+            .collection("public")
+            .document("data")
+            .collection("reports")
+            .document(report_id)
+        )
+        doc = doc_ref.get()
+        if not doc.exists:
+            return False
+        doc_ref.update({"status": new_status})
+        return True
+    except Exception as e:
+        print(f"Error updating report status: {e}")
+        return False
 
 
 def get_recent_reports(limit: int = 10, status: Optional[str] = None) -> list:

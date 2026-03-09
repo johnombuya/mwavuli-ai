@@ -25,6 +25,8 @@ from utils.db import save_report, is_database_connected, get_ingestion_last_run,
 from utils import analytics
 from utils import export
 from utils.twilio_client import is_twilio_configured, send_whatsapp_message, validate_twilio_signature
+from utils.audit import log_audit_event
+from utils.auth import has_permission
 
 
 # Pydantic Models
@@ -33,6 +35,8 @@ class VerifyTextRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=5000, description="Text to analyze")
     sender_id: str = Field(..., min_length=1, description="Sender identifier (will be anonymized)")
     county: Optional[str] = Field(None, description="Kenyan county for regional context")
+    sector: str = Field("political", description="Sector: political, health, security, fraud")
+    org_id: Optional[str] = Field(None, description="Organization identifier for multi-tenant isolation")
 
 
 class VerifyMediaRequest(BaseModel):
@@ -154,6 +158,49 @@ class StatusSummaryResponse(BaseModel):
     total: int
 
 
+# ---- API Key authentication middleware ----
+_API_KEYS_RAW = os.getenv("API_KEYS", "")
+_API_KEYS = {k.strip() for k in _API_KEYS_RAW.split(",") if k.strip()} if _API_KEYS_RAW else set()
+
+_PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc"}
+
+
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+_ADMIN_PATHS = {"/api/v1/admin/"}
+
+
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Reject requests without a valid X-API-Key when API_KEYS env is set.
+    Also enforces role-based access for admin endpoints."""
+
+    async def dispatch(self, request: Request, call_next):
+        if not _API_KEYS:
+            return await call_next(request)
+        path = request.url.path
+        if path in _PUBLIC_PATHS or path.startswith("/docs") or path.startswith("/redoc"):
+            return await call_next(request)
+        key = request.headers.get("X-API-Key", "")
+        if key not in _API_KEYS:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+        # Role gate for admin-only paths
+        if any(path.startswith(p) for p in _ADMIN_PATHS):
+            if not has_permission(key, "admin"):
+                return JSONResponse(status_code=403, content={"detail": "Admin role required"})
+        # Role gate for export paths and report mutations
+        if "/export/" in path:
+            if not has_permission(key, "analyst"):
+                return JSONResponse(status_code=403, content={"detail": "Analyst role required"})
+        if request.method == "PATCH" and "/reports/" in path:
+            if not has_permission(key, "analyst"):
+                return JSONResponse(status_code=403, content={"detail": "Analyst role required"})
+        if "/appeals/" in path and "/resolve" in path and request.method == "POST":
+            if not has_permission(key, "analyst"):
+                return JSONResponse(status_code=403, content={"detail": "Analyst role required"})
+        return await call_next(request)
+
+
 # Global analyzer instance
 analyzer: Optional[MwavuliAnalyzer] = None
 
@@ -191,9 +238,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],  # Frontend only needs GET and POST
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
+
+app.add_middleware(APIKeyMiddleware)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["System"])
@@ -253,18 +302,30 @@ async def verify_text(request: VerifyTextRequest):
         )
     
     try:
-        # Analyze the text
-        result = await analyzer.analyze(request.text)
+        # Per-sender rate limit
+        from utils.rate_limit import is_rate_limited
+        from utils.db import _anonymize_sender as _anon
+        if is_rate_limited(_anon(request.sender_id)):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded. Please try again later.",
+            )
+
+        # Analyze the text (pass sector for sector-specific lexicon)
+        result = await analyzer.analyze(request.text, sector=request.sector)
         
         # Prepare report data
         report_data = {
             "text": request.text,
             "risk_level": result.risk_level,
-            "language": "auto-detect",  # Could be enhanced with language detection
+            "language": "auto-detect",
             "county": request.county or "unknown",
             "sender_id": request.sender_id,
             "scores": result.scores,
+            "sector": request.sector,
         }
+        if request.org_id:
+            report_data["org_id"] = request.org_id
         
         if result.matched_keyword:
             report_data["matched_keyword"] = result.matched_keyword
@@ -273,6 +334,30 @@ async def verify_text(request: VerifyTextRequest):
             report_data["gemini_context_flag"] = True
         if result.explanation:
             report_data["explanation"] = result.explanation
+        if result.explanation_details:
+            report_data["explanation_details"] = result.explanation_details
+        report_data["confidence_score"] = result.confidence_score
+        if result.kenyan_model_risk:
+            report_data["kenyan_model_risk"] = result.kenyan_model_risk
+        if result.kenyan_model_score is not None:
+            report_data["kenyan_model_score"] = result.kenyan_model_score
+
+        # Coordinated campaign detection
+        from utils.db import _anonymize_sender, detect_coordinated_activity
+        sender_hash = _anonymize_sender(request.sender_id)
+        is_coordinated = detect_coordinated_activity(sender_hash)
+        if is_coordinated:
+            report_data["coordinated_campaign"] = True
+
+        # Recommended action
+        if result.risk_level == "HIGH" and is_coordinated:
+            report_data["recommended_action"] = "Escalate to NPS — coordinated campaign"
+        elif result.risk_level == "HIGH":
+            report_data["recommended_action"] = "Notify county commissioner"
+        elif result.risk_level == "MEDIUM":
+            report_data["recommended_action"] = "Monitor for 24 h"
+        else:
+            report_data["recommended_action"] = "Archive"
         
         # Save report to Firestore
         report_id = save_report(report_data)
@@ -303,50 +388,98 @@ async def verify_text(request: VerifyTextRequest):
 @app.post("/api/v1/verify/media", response_model=VerifyResponse, tags=["Verification"])
 async def verify_media(request: VerifyMediaRequest):
     """
-    Verify media content for deepfakes and harmful information.
-    
-    **PLACEHOLDER ENDPOINT**
-    
-    This endpoint is a placeholder for future deepfake detection functionality.
-    Currently returns a mock HIGH risk response for testing purposes.
-    
-    In future versions, this will:
-    1. Download and analyze media content
-    2. Detect AI-generated or manipulated images/videos
-    3. Check for known misinformation content
-    4. Return appropriate risk levels and guidance
+    Verify media content for harmful information.
+
+    Image verification uses Gemini Vision for Kenyan-context risk assessment.
+    Video and audio types return a placeholder awaiting future implementation.
     """
-    # Mock response for testing - always returns HIGH risk
-    mock_report_data = {
+    from utils.rate_limit import is_rate_limited
+    import hashlib
+    sender_hash = hashlib.sha256(request.sender_id.encode()).hexdigest()[:16]
+    if is_rate_limited(sender_hash):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+    if request.media_type == "image":
+        from models.media_analyzer import analyze_image
+        try:
+            result = await analyze_image(request.media_url)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Image analysis failed: {e}")
+
+        report_data = {
+            "text": f"[IMAGE] {request.media_url}",
+            "risk_level": result.risk_level,
+            "language": "media",
+            "county": request.county or "unknown",
+            "sender_id": request.sender_id,
+            "scores": {},
+            "explanation": result.explanation,
+            "media_type": "image",
+            "media_url": request.media_url,
+            "detected_text_summary": result.detected_text_summary,
+        }
+        report_id = save_report(report_data)
+
+        risk_messages = {
+            "HIGH": {
+                "english": f"Warning: This image has been assessed as HIGH risk. {result.explanation}",
+                "swahili": f"Onyo: Picha hii imetathminiwa kuwa hatari ya JUU. {result.explanation}",
+                "sheng": f"Caution: Hii picha imeflagiwa HIGH risk. {result.explanation}",
+            },
+            "MEDIUM": {
+                "english": f"Caution: This image requires attention. {result.explanation}",
+                "swahili": f"Tahadhari: Picha hii inahitaji umakini. {result.explanation}",
+                "sheng": f"Kaa chonjo: Hii picha inahitaji kuchunguzwa. {result.explanation}",
+            },
+        }
+        msgs = risk_messages.get(result.risk_level, {
+            "english": f"This image appears to be low risk. {result.explanation}",
+            "swahili": f"Picha hii inaonekana kuwa na hatari ndogo. {result.explanation}",
+            "sheng": f"Hii picha inakaa sawa. {result.explanation}",
+        })
+
+        return VerifyResponse(
+            risk_level=result.risk_level,
+            messages=TranslatedMessages(**msgs),
+            report_id=report_id,
+            prebunking_tip="Always verify images before sharing. Manipulated images spread fast during election periods.",
+            scores={},
+            matched_keyword=None,
+            explanation=result.explanation,
+        )
+
+    # Video / audio placeholder
+    report_data = {
         "text": f"[MEDIA: {request.media_type}] {request.media_url}",
-        "risk_level": "HIGH",
+        "risk_level": "MEDIUM",
         "language": "media",
         "county": request.county or "unknown",
         "sender_id": request.sender_id,
-        "scores": {"deepfake_detection": 0.85},
+        "scores": {},
+        "media_type": request.media_type,
     }
-    
-    # Save mock report
-    report_id = save_report(mock_report_data)
-    
+    report_id = save_report(report_data)
+
     return VerifyResponse(
-        risk_level="HIGH",
+        risk_level="MEDIUM",
         messages=TranslatedMessages(
-            english="Warning: Media content verification is in development. This media has been flagged for manual review. Do not share unverified media during the election period.",
-            swahili="Onyo: Uthibitishaji wa maudhui ya media unaendelezwa. Media hii imewekwa alama kwa ukaguzi wa mikono. Usishiriki media ambayo haijathibitishwa wakati wa uchaguzi.",
-            sheng="Heads up: Media verification bado inafanyiwa kazi. Hii media imeflagiwa for manual check. Usishare media bila kuthibitisha during elections."
+            english=f"{request.media_type.title()} verification is not yet supported. This content has been logged for manual review.",
+            swahili=f"Uthibitishaji wa {request.media_type} bado haujapatikana. Maudhui haya yamehifadhiwa kwa ukaguzi.",
+            sheng=f"{request.media_type.title()} verification haijafika bado. Imelogishwa for manual check.",
         ),
         report_id=report_id,
         prebunking_tip="For official election results, always visit iebc.or.ke",
-        scores={"deepfake_detection": 0.85, "placeholder": True},
-        matched_keyword=None
+        scores={},
+        matched_keyword=None,
     )
 
 
 @app.get("/api/v1/analytics/summary", response_model=SummaryStatsResponse, tags=["Analytics"])
 async def get_summary_stats(
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Get overall statistics summary.
@@ -363,6 +496,8 @@ async def get_summary_stats(
             analytics.get_summary_stats,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         response_data = SummaryStatsResponse(**stats)
         
@@ -390,7 +525,9 @@ async def get_summary_stats(
 @app.get("/api/v1/analytics/risk-distribution", response_model=RiskDistributionResponse, tags=["Analytics"])
 async def get_risk_distribution(
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Get distribution of risk levels.
@@ -407,6 +544,8 @@ async def get_risk_distribution(
             analytics.get_risk_level_distribution,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         total = sum(distribution.values())
         
@@ -433,7 +572,9 @@ async def get_risk_distribution(
 async def get_county_analysis(
     county: Optional[str] = Query(None, description="Filter by specific county"),
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Analyze risk levels by county.
@@ -451,6 +592,8 @@ async def get_county_analysis(
             county,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         return CountyAnalysisResponse(counties=analysis)
     except ValueError as e:
@@ -469,7 +612,9 @@ async def get_county_analysis(
 async def get_keyword_trends(
     limit: int = Query(20, ge=1, le=100, description="Maximum number of keywords to return"),
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Get most frequently matched keywords.
@@ -487,6 +632,8 @@ async def get_keyword_trends(
             limit,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         return KeywordTrendsResponse(keywords=keywords, total_keywords=len(keywords))
     except ValueError as e:
@@ -505,7 +652,9 @@ async def get_keyword_trends(
 async def get_toxicity_trends(
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Get average toxicity scores over time.
@@ -523,6 +672,8 @@ async def get_toxicity_trends(
             days,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         return ToxicityTrendsResponse(trends=trends, period_days=days)
     except ValueError as e:
@@ -540,7 +691,9 @@ async def get_toxicity_trends(
 @app.get("/api/v1/analytics/hourly-patterns", response_model=PatternAnalysisResponse, tags=["Analytics"])
 async def get_hourly_patterns(
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Analyze when high-risk content is most common by hour of day.
@@ -557,6 +710,8 @@ async def get_hourly_patterns(
             analytics.get_hourly_patterns,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         return PatternAnalysisResponse(patterns=patterns, pattern_type="hourly")
     except ValueError as e:
@@ -574,7 +729,9 @@ async def get_hourly_patterns(
 @app.get("/api/v1/analytics/daily-patterns", response_model=PatternAnalysisResponse, tags=["Analytics"])
 async def get_daily_patterns(
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Analyze risk distribution by day of week.
@@ -591,6 +748,8 @@ async def get_daily_patterns(
             analytics.get_daily_patterns,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         return PatternAnalysisResponse(patterns=patterns, pattern_type="daily")
     except ValueError as e:
@@ -608,7 +767,9 @@ async def get_daily_patterns(
 @app.get("/api/v1/analytics/detection-comparison", response_model=DetectionComparisonResponse, tags=["Analytics"])
 async def get_detection_comparison(
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Compare Gemini-detected vs lexicon-detected high-risk content.
@@ -625,6 +786,8 @@ async def get_detection_comparison(
             analytics.get_gemini_vs_lexicon_comparison,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         return DetectionComparisonResponse(comparison=comparison)
     except ValueError as e:
@@ -642,7 +805,9 @@ async def get_detection_comparison(
 @app.get("/api/v1/analytics/detection-risk-matrix", response_model=DetectionRiskMatrixResponse, tags=["Analytics"])
 async def get_detection_risk_matrix(
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Aggregate counts by detection method and risk level.
@@ -657,6 +822,8 @@ async def get_detection_risk_matrix(
             analytics.get_detection_method_risk_matrix,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         return DetectionRiskMatrixResponse(matrix=matrix)
     except ValueError as e:
@@ -675,7 +842,9 @@ async def get_detection_risk_matrix(
 async def get_confidence_histogram(
     bucket_size: float = Query(0.1, ge=0.01, le=0.5, description="Bucket size for confidence bins"),
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Get histogram of confidence_score across reports.
@@ -691,6 +860,8 @@ async def get_confidence_histogram(
             start_dt,
             end_dt,
             bucket_size=bucket_size,
+            sector=sector,
+            org_id=org_id,
         )
         return ConfidenceHistogramResponse(buckets=buckets)
     except ValueError as e:
@@ -708,7 +879,9 @@ async def get_confidence_histogram(
 @app.get("/api/v1/analytics/url-mention-risk", response_model=UrlMentionRiskResponse, tags=["Analytics"])
 async def get_url_mention_risk(
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Compare risk distributions for reports with/without URLs and mentions.
@@ -723,6 +896,8 @@ async def get_url_mention_risk(
             analytics.get_url_mention_risk_stats,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         return UrlMentionRiskResponse(stats=stats)
     except ValueError as e:
@@ -740,7 +915,9 @@ async def get_url_mention_risk(
 @app.get("/api/v1/analytics/status-summary", response_model=StatusSummaryResponse, tags=["Analytics"])
 async def get_status_summary(
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Get counts of reports by moderation status.
@@ -755,6 +932,8 @@ async def get_status_summary(
             analytics.get_status_counts,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         if not summary:
             return StatusSummaryResponse(counts={}, total=0)
@@ -774,7 +953,9 @@ async def get_status_summary(
 @app.get("/api/v1/analytics/geographic-heatmap", response_model=GeographicHeatmapResponse, tags=["Analytics"])
 async def get_geographic_heatmap(
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Get county-level risk aggregation for heatmap visualization.
@@ -791,6 +972,8 @@ async def get_geographic_heatmap(
             analytics.get_geographic_heatmap,
             start_dt,
             end_dt,
+            sector=sector,
+            org_id=org_id,
         )
         return GeographicHeatmapResponse(counties=heatmap)
     except ValueError as e:
@@ -837,7 +1020,9 @@ async def get_top_tokens(
     limit: int = Query(20, ge=1, le=100, description="Maximum number of tokens to return"),
     risk_levels: Optional[str] = Query("HIGH", description="Comma-separated risk levels to include"),
     start_date: Optional[str] = Query(None, description="Start date (ISO format: YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)")
+    end_date: Optional[str] = Query(None, description="End date (ISO format: YYYY-MM-DD)"),
+    sector: Optional[str] = Query(None, description="Sector filter"),
+    org_id: Optional[str] = Query(None, description="Organization filter"),
 ):
     """
     Get most frequent tokens from high-risk reports (text-based trends).
@@ -861,6 +1046,8 @@ async def get_top_tokens(
             start_dt,
             end_dt,
             levels,
+            sector=sector,
+            org_id=org_id,
         )
         return TopTokensResponse(tokens=tokens)
     except ValueError as e:
@@ -893,6 +1080,8 @@ async def export_reports(
         
         field_list = [f.strip() for f in fields.split(",")] if fields else None
         
+        log_audit_event("export_reports", details={"format": format, "start_date": start_date, "end_date": end_date})
+
         if format == "csv":
             csv_data = await asyncio.to_thread(
                 export.export_reports_to_csv,
@@ -1186,6 +1375,366 @@ async def twilio_webhook_post(
     return PlainTextResponse("", status_code=200)
 
 
+@app.get("/api/v1/analytics/national-risk-level", tags=["Analytics"])
+async def get_national_risk_level():
+    """Traffic-light national risk indicator (RED/AMBER/GREEN)."""
+    try:
+        result = await asyncio.to_thread(analytics.get_national_risk_level)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/analytics/daily-summary", tags=["Analytics"])
+async def get_daily_summary():
+    """Natural language summary of the last 24 hours."""
+    from datetime import timedelta
+    end_dt = datetime.utcnow()
+    start_dt = end_dt - timedelta(hours=24)
+    try:
+        stats = await asyncio.to_thread(analytics.get_summary_stats, start_dt, end_dt)
+        total = stats.get("total_reports", 0)
+        risk_dist = stats.get("risk_distribution", {})
+        top_kw = stats.get("top_keywords", [])
+        top_counties = stats.get("top_counties", [])
+
+        kw_str = ", ".join(f"{k['keyword']} ({k['count']})" for k in top_kw[:5]) or "none"
+        county_str = ", ".join(f"{c['county']} ({c['count']})" for c in top_counties[:3]) or "none"
+
+        summary = (
+            f"In the last 24 hours, {total} reports were analyzed. "
+            f"Risk breakdown: {risk_dist.get('HIGH', 0)} HIGH, "
+            f"{risk_dist.get('MEDIUM', 0)} MEDIUM, {risk_dist.get('LOW', 0)} LOW. "
+            f"Top keywords: {kw_str}. Top counties: {county_str}."
+        )
+        return {"summary": summary, "stats": stats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/analytics/coordinated-campaigns", tags=["Analytics"])
+async def get_coordinated_campaigns_endpoint(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+):
+    """Return reports flagged as coordinated campaigns."""
+    try:
+        start_dt = datetime.fromisoformat(start_date) if start_date else None
+        end_dt = datetime.fromisoformat(end_date) if end_date else None
+        results = await asyncio.to_thread(analytics.get_coordinated_campaigns, start_dt, end_dt)
+        return {"campaigns": results, "count": len(results)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+from utils.emergency_config import get_emergency_mode as _get_em, set_emergency_mode as _set_em
+
+
+@app.get("/api/v1/admin/emergency-mode", tags=["Admin"])
+async def get_emergency_mode():
+    return {"emergency_mode": _get_em()}
+
+
+@app.post("/api/v1/admin/emergency-mode", tags=["Admin"])
+async def toggle_emergency_mode(enable: bool = True):
+    _set_em(enable)
+    log_audit_event("emergency_mode_toggle", details={"enabled": enable})
+    return {"emergency_mode": _get_em()}
+
+
+@app.get("/api/v1/admin/audit-logs", tags=["Admin"])
+async def get_audit_logs(
+    limit: int = Query(50, ge=1, le=500),
+    action: Optional[str] = Query(None, description="Filter by action type"),
+):
+    """Retrieve recent audit log entries (admin only)."""
+    from utils.db import _get_db
+    db = _get_db()
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        ref = (
+            db.collection("artifacts")
+            .document("mwavuli")
+            .collection("public")
+            .document("data")
+            .collection("audit_logs")
+        )
+        query = ref.order_by("timestamp", direction="DESCENDING")
+        if action:
+            query = query.where("action", "==", action)
+        query = query.limit(limit)
+        logs = []
+        for doc in query.stream():
+            d = doc.to_dict()
+            d["id"] = doc.id
+            if "timestamp" in d and hasattr(d["timestamp"], "isoformat"):
+                d["timestamp"] = d["timestamp"].isoformat()
+            logs.append(d)
+        return {"logs": logs, "count": len(logs)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class UpdateReportStatusRequest(BaseModel):
+    status: str = Field(..., description="New status: pending, reviewed, or escalated")
+
+
+@app.patch("/api/v1/reports/{report_id}", tags=["Reports"])
+async def update_report_status_endpoint(report_id: str, body: UpdateReportStatusRequest):
+    """Update a report's moderation status (analyst or admin)."""
+    from utils.db import update_report_status
+    ok = update_report_status(report_id, body.status)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Invalid status or report not found")
+    log_audit_event("update_report_status", details={"report_id": report_id, "status": body.status})
+    return {"report_id": report_id, "status": body.status}
+
+
+class AppealRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=2000, description="Reason for the appeal")
+
+
+@app.post("/api/v1/reports/{report_id}/appeal", tags=["Reports"])
+async def appeal_report(report_id: str, appeal: AppealRequest):
+    """Submit an appeal for a flagged report."""
+    from utils.db import _get_db, get_report
+    report = get_report(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    db = _get_db()
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        ref = (
+            db.collection("artifacts")
+            .document("mwavuli")
+            .collection("public")
+            .document("data")
+            .collection("report_appeals")
+        )
+        _, doc_ref = ref.add({
+            "report_id": report_id,
+            "reason": appeal.reason,
+            "status": "pending",
+            "timestamp": datetime.utcnow(),
+            "original_risk_level": report.get("risk_level"),
+        })
+        log_audit_event("report_appeal_submitted", details={"report_id": report_id})
+        return {"appeal_id": doc_ref.id, "status": "pending"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/reports/appeals", tags=["Reports"])
+async def list_appeals(
+    status: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    report_id: Optional[str] = Query(None),
+):
+    """List report appeals, optionally filtered by status or report_id."""
+    from utils.db import _get_db
+    db = _get_db()
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        ref = (
+            db.collection("artifacts")
+            .document("mwavuli")
+            .collection("public")
+            .document("data")
+            .collection("report_appeals")
+        )
+        query = ref.order_by("timestamp", direction="DESCENDING")
+        if status:
+            query = query.where("status", "==", status)
+        if report_id:
+            query = query.where("report_id", "==", report_id)
+        query = query.limit(limit)
+        appeals = []
+        for doc in query.stream():
+            d = doc.to_dict()
+            d["appeal_id"] = doc.id
+            if "timestamp" in d and hasattr(d["timestamp"], "isoformat"):
+                d["timestamp"] = d["timestamp"].isoformat()
+            if "resolved_at" in d and hasattr(d["resolved_at"], "isoformat"):
+                d["resolved_at"] = d["resolved_at"].isoformat()
+            appeals.append(d)
+        return {"appeals": appeals, "count": len(appeals)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ResolveAppealRequest(BaseModel):
+    resolution: str = Field(..., description="upheld or overturned")
+    notes: Optional[str] = Field(None, max_length=2000)
+
+
+@app.post("/api/v1/reports/appeals/{appeal_id}/resolve", tags=["Reports"])
+async def resolve_appeal(appeal_id: str, body: ResolveAppealRequest):
+    """Resolve a pending appeal (analyst or admin)."""
+    if body.resolution not in ("upheld", "overturned"):
+        raise HTTPException(status_code=400, detail="resolution must be 'upheld' or 'overturned'")
+    from utils.db import _get_db, update_report_status
+    db = _get_db()
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        doc_ref = (
+            db.collection("artifacts")
+            .document("mwavuli")
+            .collection("public")
+            .document("data")
+            .collection("report_appeals")
+            .document(appeal_id)
+        )
+        doc = doc_ref.get()
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Appeal not found")
+        update: dict = {
+            "status": "resolved",
+            "resolved_at": datetime.utcnow(),
+            "resolution": body.resolution,
+        }
+        if body.notes:
+            update["notes"] = body.notes
+        doc_ref.update(update)
+        if body.resolution == "overturned":
+            appeal_data = doc.to_dict()
+            linked_report_id = appeal_data.get("report_id")
+            if linked_report_id:
+                update_report_status(linked_report_id, "reviewed")
+        log_audit_event("appeal_resolved", details={
+            "appeal_id": appeal_id,
+            "resolution": body.resolution,
+        })
+        return {"appeal_id": appeal_id, "status": "resolved", "resolution": body.resolution}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/export/stix", tags=["Export"])
+async def export_stix(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+):
+    """Export HIGH-risk reports as a STIX 2.1 bundle."""
+    import json as _json, uuid as _uuid
+    try:
+        start_dt = datetime.fromisoformat(start_date) if start_date else None
+        end_dt = datetime.fromisoformat(end_date) if end_date else None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date: {e}")
+
+    dist = await asyncio.to_thread(analytics.get_risk_level_distribution, start_dt, end_dt)
+    # Fetch raw high-risk reports
+    from utils.db import _get_db
+    db = _get_db()
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    ref = (
+        db.collection("artifacts")
+        .document("mwavuli")
+        .collection("public")
+        .document("data")
+        .collection("reports")
+    )
+    q = ref.where("risk_level", "==", "HIGH").order_by("timestamp").limit(500)
+    if start_dt:
+        q = ref.where("risk_level", "==", "HIGH").where("timestamp", ">=", start_dt).limit(500)
+
+    objects = []
+    identity_id = f"identity--{_uuid.uuid5(_uuid.NAMESPACE_URL, 'mwavuli')}"
+    objects.append({
+        "type": "identity",
+        "spec_version": "2.1",
+        "id": identity_id,
+        "created": datetime.utcnow().isoformat() + "Z",
+        "modified": datetime.utcnow().isoformat() + "Z",
+        "name": "Project Mwavuli",
+        "identity_class": "system",
+    })
+
+    for doc in q.stream():
+        d = doc.to_dict()
+        ts = d.get("timestamp")
+        ts_str = ts.isoformat() + "Z" if hasattr(ts, "isoformat") else str(ts)
+        indicator_id = f"indicator--{_uuid.uuid5(_uuid.NAMESPACE_URL, doc.id)}"
+        objects.append({
+            "type": "indicator",
+            "spec_version": "2.1",
+            "id": indicator_id,
+            "created": ts_str,
+            "modified": ts_str,
+            "name": f"HIGH-risk content ({d.get('matched_keyword', 'N/A')})",
+            "description": d.get("explanation", ""),
+            "indicator_types": ["malicious-activity"],
+            "pattern": f"[content:value = '{doc.id}']",
+            "pattern_type": "stix",
+            "valid_from": ts_str,
+            "created_by_ref": identity_id,
+            "labels": ["hate-speech", d.get("sector", "political")],
+        })
+
+    bundle = {
+        "type": "bundle",
+        "id": f"bundle--{_uuid.uuid4()}",
+        "objects": objects,
+    }
+    log_audit_event("export_stix", details={"count": len(objects) - 1})
+    return JSONResponse(content=bundle, headers={"Content-Disposition": "attachment; filename=mwavuli_stix.json"})
+
+
+@app.post("/api/v1/webhooks/africastalking", tags=["SMS"])
+async def africastalking_sms_webhook(request: Request):
+    """
+    Africa's Talking incoming SMS webhook.
+    Parse the SMS, run through analyzer, and reply with risk assessment.
+    """
+    form = await request.form()
+    text = (form.get("text") or "").strip()
+    sender = (form.get("from") or "").strip()
+
+    if not text or analyzer is None:
+        return JSONResponse(content={"status": "ignored"})
+
+    try:
+        result = await analyzer.analyze(text)
+    except Exception as e:
+        print(f"[AT SMS] analyze error: {e}")
+        return JSONResponse(content={"status": "error"})
+
+    report_data = {
+        "text": text,
+        "risk_level": result.risk_level,
+        "language": "auto-detect",
+        "county": "unknown",
+        "sender_id": sender,
+        "scores": result.scores,
+        "sector": "political",
+    }
+    if result.matched_keyword:
+        report_data["matched_keyword"] = result.matched_keyword
+    save_report(report_data)
+
+    reply = result.messages.get("english", "")
+    try:
+        import africastalking
+        at_username = os.getenv("AT_USERNAME", "sandbox")
+        at_api_key = os.getenv("AT_API_KEY", "")
+        if at_api_key:
+            africastalking.initialize(at_username, at_api_key)
+            sms = africastalking.SMS
+            sms.send(reply[:160], [sender])
+    except Exception as e:
+        print(f"[AT SMS] send error: {e}")
+
+    return JSONResponse(content={"status": "ok", "risk_level": result.risk_level})
+
+
 @app.get("/", tags=["System"])
 async def root():
     """
@@ -1194,6 +1743,7 @@ async def root():
     return {
         "name": "Project Mwavuli API",
         "description": "Content verification for combating election misinformation in Kenya",
+        "notice": "This system is designed for harm reduction, not surveillance.",
         "version": "1.0.0",
         "endpoints": {
             "health": "/health",
