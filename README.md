@@ -122,9 +122,13 @@ The application will be available at:
    ```
 
 6. **Run backend**:
-   ```bash
-   uvicorn app.main:app --reload
-   ```
+  
+```bash
+cd backend
+source .venv/Scripts/activate
+uvicorn app.main:app --reload
+```
+
 
 ### Frontend Setup
 
