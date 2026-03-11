@@ -30,6 +30,7 @@ export function RecentReports() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'recent', statusFilter],
     queryFn: () => analyticsApi.getRecentReports({ limit: 15, status: statusFilter || undefined }),
+    staleTime: 2 * 60 * 1000,
   });
 
   const mutation = useMutation({

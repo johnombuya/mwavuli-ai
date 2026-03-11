@@ -13,6 +13,7 @@ export function HourlyPatternsChart({ dateRange }: HourlyPatternsChartProps) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'hourly-patterns', dateRange],
     queryFn: () => analyticsApi.getHourlyPatterns(dateRange),
+    staleTime: 2 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingSpinner />;

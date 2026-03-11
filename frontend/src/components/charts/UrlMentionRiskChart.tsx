@@ -24,6 +24,7 @@ export function UrlMentionRiskChart({
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'url-mention-risk', dateRange],
     queryFn: () => analyticsApi.getUrlMentionRisk(dateRange),
+    staleTime: 2 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingSpinner />;

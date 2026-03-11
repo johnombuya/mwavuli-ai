@@ -16,11 +16,26 @@ export function NationalRiskIndicator() {
     queryKey: ['analytics', 'national-risk-level'],
     queryFn: () => analyticsApi.getNationalRiskLevel(),
     refetchInterval,
+    staleTime: 2 * 60 * 1000,
   });
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <div className="animate-pulse h-20 rounded-xl bg-slate-100" />
+    );
+  }
+
+  if (!data || (data.total_reports <= 1 && data.high_pct === 0 && data.medium_pct === 0)) {
+    return (
+      <div className="bg-slate-100 text-slate-600 rounded-xl ring-2 ring-slate-300 p-5 flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest opacity-70">National risk status</p>
+          <p className="text-2xl font-bold mt-1">NO DATA</p>
+        </div>
+        <div className="text-right text-sm opacity-80">
+          <p>No reports in the last 24 hours</p>
+        </div>
+      </div>
     );
   }
 

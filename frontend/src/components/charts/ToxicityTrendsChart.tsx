@@ -13,6 +13,7 @@ export function ToxicityTrendsChart({ dateRange }: ToxicityTrendsChartProps) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'toxicity-trends', dateRange],
     queryFn: () => analyticsApi.getToxicityTrends({ days: 30, ...dateRange }),
+    staleTime: 2 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingSpinner />;

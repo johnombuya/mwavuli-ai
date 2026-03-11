@@ -13,6 +13,7 @@ export function KeywordTrendsChart({ dateRange }: KeywordTrendsChartProps) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'keyword-trends', dateRange],
     queryFn: () => analyticsApi.getKeywordTrends({ limit: 10, ...dateRange }),
+    staleTime: 2 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingSpinner />;

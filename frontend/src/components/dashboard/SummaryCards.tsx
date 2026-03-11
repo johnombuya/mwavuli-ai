@@ -15,10 +15,12 @@ export function SummaryCards({ dateRange }: SummaryCardsProps) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'summary', dateRange],
     queryFn: () => analyticsApi.getSummary(dateRange),
+    staleTime: 2 * 60 * 1000,
   });
   const { data: statusSummary } = useQuery({
     queryKey: ['analytics', 'status-summary', dateRange],
     queryFn: () => analyticsApi.getStatusSummary(dateRange),
+    staleTime: 2 * 60 * 1000,
   });
 
   const cardBase =
@@ -48,7 +50,20 @@ export function SummaryCards({ dateRange }: SummaryCardsProps) {
     );
   }
 
-  if (!data) return null;
+  if (!data) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {['Total Reports', 'High Risk', 'Medium Risk', 'Low Risk'].map((label) => (
+          <div key={label} className={`${cardBase} border-l-slate-300`}>
+            <h3 className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-2">
+              {label}
+            </h3>
+            <p className="text-3xl font-bold text-slate-300">&mdash;</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   const pendingCount = statusSummary?.counts?.pending ?? 0;
   const reviewedCount = statusSummary?.counts?.reviewed ?? 0;

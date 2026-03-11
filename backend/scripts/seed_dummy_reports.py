@@ -251,36 +251,15 @@ REPORT_GENERATORS: Dict[str, Callable[..., List[Dict[str, Any]]]] = {
 }
 
 
-# ---------- Firestore ----------
+# ---------- Database ----------
 
-def get_firestore_collection():
-    try:
-        import firebase_admin
-        from firebase_admin import credentials, firestore
-    except ImportError:
-        raise SystemExit("Install dependencies: pip install firebase-admin python-dotenv (or use venv + pip install -r requirements.txt)")
-    raw_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH") or "firebase-service-account.json"
-    path = Path(raw_path)
-    if not path.is_absolute():
-        path = (BACKEND_ROOT / path).resolve()
-    service_account_path = str(path)
-    if not path.exists():
-        fallback = BACKEND_ROOT / "firebase-service-account.json"
-        if fallback.exists():
-            service_account_path = str(fallback)
-        else:
-            raise SystemExit(f"Credentials file not found: {service_account_path}")
-    try:
-        firebase_admin.get_app()
-    except ValueError:
-        cred = credentials.Certificate(service_account_path)
-        database_id = os.getenv("FIREBASE_DATABASE_ID") or None
-        firebase_admin.initialize_app(cred)
-        db = firestore.client(database_id=database_id) if database_id else firestore.client()
-    else:
-        database_id = os.getenv("FIREBASE_DATABASE_ID")
-        db = firestore.client(database_id=database_id) if database_id else firestore.client()
-    return db.collection("artifacts").document("mwavuli").collection("public").document("data").collection("reports")
+def _get_repo():
+    """Get the repository via the provider-agnostic factory."""
+    from utils.db import get_repository
+    repo = get_repository()
+    if not repo.is_connected():
+        raise SystemExit("Database not connected. Check your .env configuration.")
+    return repo
 
 
 # ---------- CLI ----------
@@ -328,15 +307,19 @@ def main() -> None:
 
     print(f"Total reports: {len(reports)}")
     if args.dry_run:
-        print("Dry run: not writing to Firestore.")
+        print("Dry run: not writing to database.")
         return
 
-    coll = get_firestore_collection()
+    repo = _get_repo()
     for i, report in enumerate(reports):
-        coll.add(report)
+        report_data = {
+            **report,
+            "sender_id": report.get("sender_hash", "seed_user"),
+        }
+        repo.save_report(report_data)
         if (i + 1) % 50 == 0:
             print(f"  Written {i + 1}/{len(reports)}")
-    print(f"Done. Written {len(reports)} reports to Firestore.")
+    print(f"Done. Written {len(reports)} reports to database.")
 
 
 if __name__ == "__main__":

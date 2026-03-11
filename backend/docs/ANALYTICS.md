@@ -453,15 +453,13 @@ def get_cached_summary(start_date, end_date):
     return analytics.get_summary_stats(start_date, end_date)
 ```
 
-### 3. Use Export Endpoints for Large Datasets
+### 3. Use Export Endpoints Sparingly
 
-For analysis requiring all data, use export endpoints:
+Export endpoints are designed for occasional analyst use, not for dashboards:
 
-```bash
-# Export and analyze locally
-curl "http://localhost:8000/api/v1/export/reports?format=csv" -o all_reports.csv
-# Then analyze with pandas, Excel, etc.
-```
+- Always provide `start_date` and `end_date` and keep windows bounded.
+- Prefer the aggregate-backed `/api/v1/analytics/*` endpoints for dashboards.
+- Use `/api/v1/export/*` and STIX export only when you explicitly need raw data outside Mwavuli.
 
 ### 4. Combine Multiple Endpoints
 
@@ -487,6 +485,14 @@ Track query performance and optimize:
 - Use date filters to limit data
 - Use export endpoints for bulk analysis
 - Consider BigQuery export for very large datasets
+
+### 7. Firestore usage guardrails (for developers)
+
+- New analytics features should be built against the `report_aggregates` collection via helpers in `utils/analytics.py` rather than scanning raw `reports` with `query_ref.stream()`.
+- Raw `reports` scans are reserved for:
+  - one-off maintenance or backfill scripts under `backend/scripts/`, or
+  - low-frequency analyst/admin tools that are clearly documented as heavy.
+- When reviewing changes, treat new uses of `.stream()` over `reports` as a red flag and consider whether an aggregate-based approach is more appropriate.
 
 ### 6. Handle Empty Results Gracefully
 

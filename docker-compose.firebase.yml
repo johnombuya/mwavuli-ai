@@ -1,0 +1,6 @@
+# Docker Compose override for Firebase provider.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.firebase.yml up
+services:
+  backend:
+    volumes:
+      - ./backend/firebase-service-account.json:/app/firebase-service-account.json:ro

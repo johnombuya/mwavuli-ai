@@ -10,6 +10,42 @@ FastAPI backend for the Mwavuli content verification and analytics platform. Han
 - **Data export**: CSV/JSON export for external tools
 - **Firebase Firestore**: Anonymized report logging
 
+## Firestore usage and optimization contract
+
+To keep Firestore usage predictable and affordable as Mwavuli grows, the backend follows these rules:
+
+- **Canonical reports vs aggregates**
+  - Raw, per-report data lives in `artifacts/mwavuli/public/data/reports` and is written only via `utils/db.save_report`.
+  - Time‑bucketed analytics live in `artifacts/mwavuli/public/data/report_aggregates`, one document per `{date}-{sector}-{org_id}`.
+
+- **Writes**
+  - All ingestion and verification flows must call `save_report` (do not write to Firestore directly).
+  - `save_report`:
+    - Normalizes text and computes a `content_hash` if not provided.
+    - Uses `report_exists_by_content_hash` / `report_exists_by_source_url` to skip duplicates.
+    - Writes the canonical report and then updates the corresponding daily aggregate document in a transaction.
+
+- **Reads for analytics and dashboards**
+  - High‑level analytics in `utils/analytics.py` (risk distributions, keyword trends, summary stats, status counts, etc.) read from `report_aggregates` whenever possible instead of scanning raw `reports`.
+  - API endpoints under `/api/v1/analytics/*` are the only supported way for the frontend to access analytics data; frontend code should never query Firestore directly.
+  - Every analytics endpoint must:
+    - Accept a bounded `(start_date, end_date)` and default to a conservative window when omitted.
+    - Prefer aggregates and only fall back to raw `reports` for specialized or low‑volume queries (e.g. STIX export, token exploration).
+
+- **Adding new analytics**
+  - When a new metric is needed, do **not** add a new Firestore scan over `reports`.
+  - Instead:
+    1. Extend the `report_aggregates` document shape with the required counters/summaries.
+    2. Update `save_report` to maintain those fields for each new report.
+    3. Add a reader function in `utils/analytics.py` that computes the metric by combining aggregate documents.
+    4. Expose it via a new or existing `/api/v1/analytics/*` endpoint.
+
+- **Exports and heavy operations**
+  - The export endpoints under `/api/v1/export/*` and the STIX export are **analyst/admin tools only**:
+    - They require API keys with the appropriate role.
+    - They enforce bounded `start_date`/`end_date` windows to avoid unintentional full-dataset scans.
+  - Dashboards and automated jobs **must not** poll export endpoints; use the aggregate-backed analytics endpoints instead.
+
 ## Prerequisites
 
 - Python 3.10+

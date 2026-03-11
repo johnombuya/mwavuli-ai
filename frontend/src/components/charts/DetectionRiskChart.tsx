@@ -22,6 +22,7 @@ export function DetectionRiskChart({ dateRange }: DetectionRiskChartProps) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'detection-risk-matrix', dateRange],
     queryFn: () => analyticsApi.getDetectionRiskMatrix(dateRange),
+    staleTime: 2 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingSpinner />;

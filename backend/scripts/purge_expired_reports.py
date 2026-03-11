@@ -1,5 +1,5 @@
 """
-Purge reports older than DATA_RETENTION_DAYS from Firestore.
+Purge reports older than DATA_RETENTION_DAYS.
 
 Run periodically via cron/task-scheduler:
   python scripts/purge_expired_reports.py [--dry-run]
@@ -17,40 +17,19 @@ _backend_root = Path(__file__).resolve().parent.parent
 load_dotenv(_backend_root / ".env")
 sys.path.insert(0, str(_backend_root))
 
-from utils.db import _get_db  # noqa: E402
+from utils.db import get_repository  # noqa: E402
 
 
 def purge(dry_run: bool = False) -> int:
     retention_days = int(os.getenv("DATA_RETENTION_DAYS", "365"))
     cutoff = datetime.utcnow() - timedelta(days=retention_days)
 
-    db = _get_db()
-    if db is None:
-        print("Firestore not connected — nothing to purge.")
+    repo = get_repository()
+    if not repo.is_connected():
+        print("Database not connected — nothing to purge.")
         return 1
 
-    reports_ref = (
-        db.collection("artifacts")
-        .document("mwavuli")
-        .collection("public")
-        .document("data")
-        .collection("reports")
-    )
-
-    query = reports_ref.where("timestamp", "<", cutoff).limit(500)
-    deleted = 0
-
-    while True:
-        docs = list(query.stream())
-        if not docs:
-            break
-        for doc in docs:
-            if dry_run:
-                ts = doc.to_dict().get("timestamp", "?")
-                print(f"[dry-run] Would delete {doc.id} (timestamp={ts})")
-            else:
-                doc.reference.delete()
-            deleted += 1
+    deleted = repo.delete_reports_before(cutoff, dry_run=dry_run)
 
     action = "Would delete" if dry_run else "Deleted"
     print(f"{action} {deleted} reports older than {retention_days} days (cutoff={cutoff.isoformat()}).")

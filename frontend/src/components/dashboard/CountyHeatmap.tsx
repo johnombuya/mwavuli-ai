@@ -13,6 +13,7 @@ export function CountyHeatmap({ dateRange }: CountyHeatmapProps) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'geographic-heatmap', dateRange],
     queryFn: () => analyticsApi.getGeographicHeatmap(dateRange),
+    staleTime: 2 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingSpinner />;

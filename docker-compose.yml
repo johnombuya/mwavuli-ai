@@ -9,7 +9,6 @@ services:
       - ./backend/.env
     volumes:
       - ./backend:/app
-      - ./backend/firebase-service-account.json:/app/firebase-service-account.json:ro
     environment:
       - FRONTEND_URL=http://localhost:3000
     healthcheck:

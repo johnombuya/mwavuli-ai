@@ -27,6 +27,7 @@ export function ConfidenceHistogramChart({
         bucket_size: 0.1,
         ...dateRange,
       }),
+    staleTime: 2 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingSpinner />;

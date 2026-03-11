@@ -13,6 +13,7 @@ export function TopTokensChart({ dateRange }: TopTokensChartProps) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'top-tokens', dateRange],
     queryFn: () => analyticsApi.getTopTokens({ limit: 15, risk_levels: 'HIGH', ...dateRange }),
+    staleTime: 2 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingSpinner />;

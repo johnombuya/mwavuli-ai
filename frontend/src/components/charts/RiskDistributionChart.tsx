@@ -20,6 +20,7 @@ export function RiskDistributionChart({ dateRange }: RiskDistributionChartProps)
   const { data, isLoading, error } = useQuery({
     queryKey: ['analytics', 'risk-distribution', dateRange],
     queryFn: () => analyticsApi.getRiskDistribution(dateRange),
+    staleTime: 2 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingSpinner />;
@@ -32,6 +33,15 @@ export function RiskDistributionChart({ dateRange }: RiskDistributionChartProps)
       name,
       value: value as number,
     }));
+
+  if (chartData.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[300px] text-slate-400">
+        <p className="text-sm">No risk data available for this period</p>
+        <p className="text-xs mt-1">Try adjusting the date range or check that reports have been submitted</p>
+      </div>
+    );
+  }
 
   return (
     <ResponsiveContainer width="100%" height={300}>

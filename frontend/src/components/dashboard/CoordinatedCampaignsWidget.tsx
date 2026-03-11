@@ -21,6 +21,7 @@ export function CoordinatedCampaignsWidget() {
       return res.data as { campaigns: CampaignReport[]; count: number };
     },
     refetchInterval,
+    staleTime: 2 * 60 * 1000,
   });
 
   if (isLoading) {

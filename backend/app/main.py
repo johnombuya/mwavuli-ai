@@ -21,7 +21,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from models.text_analyzer import get_analyzer, MwavuliAnalyzer
-from utils.db import save_report, is_database_connected, get_ingestion_last_run, get_recent_reports
+from utils.db import (
+    save_report, is_database_connected, get_ingestion_last_run,
+    get_recent_reports, get_repository, _anonymize_sender,
+)
 from utils import analytics
 from utils import export
 from utils.twilio_client import is_twilio_configured, send_whatsapp_message, validate_twilio_signature
@@ -162,7 +165,7 @@ class StatusSummaryResponse(BaseModel):
 _API_KEYS_RAW = os.getenv("API_KEYS", "")
 _API_KEYS = {k.strip() for k in _API_KEYS_RAW.split(",") if k.strip()} if _API_KEYS_RAW else set()
 
-_PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc"}
+_PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc", "/api/v1/health", "/api/v1/health/data-integrity"}
 
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -210,11 +213,34 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown."""
     global analyzer
     print("Starting Mwavuli API...")
-    # Load the analyzer on startup
     analyzer = get_analyzer()
+
+    try:
+        from datetime import timedelta
+
+        repo = get_repository()
+        if repo.is_connected():
+            end_dt = datetime.utcnow()
+            start_dt = end_dt - timedelta(days=7)
+            aggs = repo.get_aggregate_docs(start_dt, end_dt)
+            if not aggs:
+                recent = repo.query_reports(limit=1)
+                if recent:
+                    print(
+                        "\n"
+                        "##########################################################\n"
+                        "# WARNING: Reports exist but report_aggregates is empty! #\n"
+                        "# Dashboard analytics will show no data until you run:   #\n"
+                        "#                                                        #\n"
+                        "#   python scripts/backfill_aggregates.py \\              #\n"
+                        "#     --start-date YYYY-MM-DD --end-date YYYY-MM-DD      #\n"
+                        "##########################################################\n"
+                    )
+    except Exception as exc:
+        print(f"Startup aggregate check skipped: {exc}")
+
     print("Mwavuli API ready.")
     yield
-    # Cleanup on shutdown
     print("Shutting down Mwavuli API...")
 
 
@@ -280,6 +306,57 @@ async def api_health():
     }
 
 
+@app.get("/api/v1/health/data-integrity", tags=["System"])
+async def check_data_integrity():
+    """Check whether reports and aggregates are in sync and well-formed."""
+    from datetime import timedelta
+
+    repo = get_repository()
+    issues: List[str] = []
+
+    has_reports = False
+    has_aggregates = False
+    agg_count = 0
+
+    try:
+        recent = repo.query_reports(limit=1)
+        has_reports = len(recent) > 0
+    except Exception as exc:
+        issues.append(f"Could not query reports table: {exc}")
+
+    try:
+        end_dt = datetime.utcnow()
+        start_dt = end_dt - timedelta(days=30)
+        aggs = repo.get_aggregate_docs(start_dt, end_dt)
+        agg_count = len(aggs)
+        has_aggregates = agg_count > 0
+
+        for agg in aggs[:3]:
+            if isinstance(agg.get("risk_counts"), str):
+                issues.append(
+                    "Aggregates contain double-serialized JSON strings "
+                    "-- re-run backfill_aggregates.py"
+                )
+                break
+    except Exception as exc:
+        issues.append(f"Could not query report_aggregates table: {exc}")
+
+    if has_reports and not has_aggregates:
+        issues.append(
+            "Reports exist but report_aggregates is empty "
+            "-- run: python scripts/backfill_aggregates.py "
+            "--start-date <earliest> --end-date <latest>"
+        )
+
+    return {
+        "healthy": len(issues) == 0,
+        "has_reports": has_reports,
+        "has_aggregates": has_aggregates,
+        "aggregate_days": agg_count,
+        "issues": issues,
+    }
+
+
 @app.post("/api/v1/verify/text", response_model=VerifyResponse, tags=["Verification"])
 async def verify_text(request: VerifyTextRequest):
     """
@@ -304,8 +381,7 @@ async def verify_text(request: VerifyTextRequest):
     try:
         # Per-sender rate limit
         from utils.rate_limit import is_rate_limited
-        from utils.db import _anonymize_sender as _anon
-        if is_rate_limited(_anon(request.sender_id)):
+        if is_rate_limited(_anonymize_sender(request.sender_id)):
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Rate limit exceeded. Please try again later.",
@@ -342,8 +418,7 @@ async def verify_text(request: VerifyTextRequest):
         if result.kenyan_model_score is not None:
             report_data["kenyan_model_score"] = result.kenyan_model_score
 
-        # Coordinated campaign detection
-        from utils.db import _anonymize_sender, detect_coordinated_activity
+        from utils.db import detect_coordinated_activity
         sender_hash = _anonymize_sender(request.sender_id)
         is_coordinated = detect_coordinated_activity(sender_hash)
         if is_coordinated:
@@ -595,7 +670,13 @@ async def get_county_analysis(
             sector=sector,
             org_id=org_id,
         )
-        return CountyAnalysisResponse(counties=analysis)
+        response = CountyAnalysisResponse(counties=analysis)
+        import json
+        return Response(
+            content=json.dumps(response.model_dump()),
+            media_type="application/json",
+            headers={"Cache-Control": "public, max-age=120"},
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -635,7 +716,13 @@ async def get_keyword_trends(
             sector=sector,
             org_id=org_id,
         )
-        return KeywordTrendsResponse(keywords=keywords, total_keywords=len(keywords))
+        response = KeywordTrendsResponse(keywords=keywords, total_keywords=len(keywords))
+        import json
+        return Response(
+            content=json.dumps(response.model_dump()),
+            media_type="application/json",
+            headers={"Cache-Control": "public, max-age=120"},
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -675,7 +762,13 @@ async def get_toxicity_trends(
             sector=sector,
             org_id=org_id,
         )
-        return ToxicityTrendsResponse(trends=trends, period_days=days)
+        response = ToxicityTrendsResponse(trends=trends, period_days=days)
+        import json
+        return Response(
+            content=json.dumps(response.model_dump()),
+            media_type="application/json",
+            headers={"Cache-Control": "public, max-age=120"},
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -975,7 +1068,13 @@ async def get_geographic_heatmap(
             sector=sector,
             org_id=org_id,
         )
-        return GeographicHeatmapResponse(counties=heatmap)
+        response = GeographicHeatmapResponse(counties=heatmap)
+        import json
+        return Response(
+            content=json.dumps(response.model_dump()),
+            media_type="application/json",
+            headers={"Cache-Control": "public, max-age=300"},
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1075,8 +1174,21 @@ async def export_reports(
     Returns reports in CSV or JSON format for analysis or import into Looker Studio.
     """
     try:
-        start_dt = datetime.fromisoformat(start_date) if start_date else None
-        end_dt = datetime.fromisoformat(end_date) if end_date else None
+        if not start_date or not end_date:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="start_date and end_date are required for exports",
+            )
+        start_dt = datetime.fromisoformat(start_date)
+        end_dt = datetime.fromisoformat(end_date)
+
+        # Enforce a maximum export window (e.g. 31 days) to avoid
+        # accidentally scanning the entire dataset in one call.
+        if (end_dt - start_dt).days > 31:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Export window too large; please request 31 days or less per call",
+            )
         
         field_list = [f.strip() for f in fields.split(",")] if fields else None
         
@@ -1180,8 +1292,20 @@ async def export_analytics(
     Returns pre-aggregated analytics in CSV format for visualization.
     """
     try:
-        start_dt = datetime.fromisoformat(start_date) if start_date else None
-        end_dt = datetime.fromisoformat(end_date) if end_date else None
+        if not start_date or not end_date:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="start_date and end_date are required for analytics export",
+            )
+        start_dt = datetime.fromisoformat(start_date)
+        end_dt = datetime.fromisoformat(end_date)
+
+        # Limit analytics export to a reasonable window (e.g. 90 days).
+        if (end_dt - start_dt).days > 90:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Analytics export window too large; please request 90 days or less per call",
+            )
         
         valid_types = [
             "risk_distribution",
@@ -1245,8 +1369,21 @@ async def export_looker_studio(
     This endpoint provides a comprehensive view with all key metrics.
     """
     try:
-        start_dt = datetime.fromisoformat(start_date) if start_date else None
-        end_dt = datetime.fromisoformat(end_date) if end_date else None
+        if not start_date or not end_date:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="start_date and end_date are required for Looker Studio export",
+            )
+        start_dt = datetime.fromisoformat(start_date)
+        end_dt = datetime.fromisoformat(end_date)
+
+        # Looker Studio views can cover larger windows, but still cap to
+        # prevent unbounded scans.
+        if (end_dt - start_dt).days > 180:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Looker Studio export window too large; please request 180 days or less per call",
+            )
         
         view_data = await asyncio.to_thread(
             export.create_looker_studio_view,
@@ -1448,29 +1585,11 @@ async def get_audit_logs(
     action: Optional[str] = Query(None, description="Filter by action type"),
 ):
     """Retrieve recent audit log entries (admin only)."""
-    from utils.db import _get_db
-    db = _get_db()
-    if db is None:
+    repo = get_repository()
+    if not repo.is_connected():
         raise HTTPException(status_code=503, detail="Database unavailable")
     try:
-        ref = (
-            db.collection("artifacts")
-            .document("mwavuli")
-            .collection("public")
-            .document("data")
-            .collection("audit_logs")
-        )
-        query = ref.order_by("timestamp", direction="DESCENDING")
-        if action:
-            query = query.where("action", "==", action)
-        query = query.limit(limit)
-        logs = []
-        for doc in query.stream():
-            d = doc.to_dict()
-            d["id"] = doc.id
-            if "timestamp" in d and hasattr(d["timestamp"], "isoformat"):
-                d["timestamp"] = d["timestamp"].isoformat()
-            logs.append(d)
+        logs = repo.get_audit_logs(limit=limit, action=action)
         return {"logs": logs, "count": len(logs)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1483,8 +1602,7 @@ class UpdateReportStatusRequest(BaseModel):
 @app.patch("/api/v1/reports/{report_id}", tags=["Reports"])
 async def update_report_status_endpoint(report_id: str, body: UpdateReportStatusRequest):
     """Update a report's moderation status (analyst or admin)."""
-    from utils.db import update_report_status
-    ok = update_report_status(report_id, body.status)
+    ok = get_repository().update_report_status(report_id, body.status)
     if not ok:
         raise HTTPException(status_code=400, detail="Invalid status or report not found")
     log_audit_event("update_report_status", details={"report_id": report_id, "status": body.status})
@@ -1498,30 +1616,24 @@ class AppealRequest(BaseModel):
 @app.post("/api/v1/reports/{report_id}/appeal", tags=["Reports"])
 async def appeal_report(report_id: str, appeal: AppealRequest):
     """Submit an appeal for a flagged report."""
-    from utils.db import _get_db, get_report
-    report = get_report(report_id)
+    repo = get_repository()
+    report = repo.get_report(report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
-    db = _get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
     try:
-        ref = (
-            db.collection("artifacts")
-            .document("mwavuli")
-            .collection("public")
-            .document("data")
-            .collection("report_appeals")
-        )
-        _, doc_ref = ref.add({
+        appeal_id = repo.create_appeal({
             "report_id": report_id,
             "reason": appeal.reason,
             "status": "pending",
             "timestamp": datetime.utcnow(),
             "original_risk_level": report.get("risk_level"),
         })
+        if appeal_id is None:
+            raise HTTPException(status_code=503, detail="Database unavailable")
         log_audit_event("report_appeal_submitted", details={"report_id": report_id})
-        return {"appeal_id": doc_ref.id, "status": "pending"}
+        return {"appeal_id": appeal_id, "status": "pending"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1533,33 +1645,11 @@ async def list_appeals(
     report_id: Optional[str] = Query(None),
 ):
     """List report appeals, optionally filtered by status or report_id."""
-    from utils.db import _get_db
-    db = _get_db()
-    if db is None:
+    repo = get_repository()
+    if not repo.is_connected():
         raise HTTPException(status_code=503, detail="Database unavailable")
     try:
-        ref = (
-            db.collection("artifacts")
-            .document("mwavuli")
-            .collection("public")
-            .document("data")
-            .collection("report_appeals")
-        )
-        query = ref.order_by("timestamp", direction="DESCENDING")
-        if status:
-            query = query.where("status", "==", status)
-        if report_id:
-            query = query.where("report_id", "==", report_id)
-        query = query.limit(limit)
-        appeals = []
-        for doc in query.stream():
-            d = doc.to_dict()
-            d["appeal_id"] = doc.id
-            if "timestamp" in d and hasattr(d["timestamp"], "isoformat"):
-                d["timestamp"] = d["timestamp"].isoformat()
-            if "resolved_at" in d and hasattr(d["resolved_at"], "isoformat"):
-                d["resolved_at"] = d["resolved_at"].isoformat()
-            appeals.append(d)
+        appeals = repo.list_appeals(status=status, limit=limit, report_id=report_id)
         return {"appeals": appeals, "count": len(appeals)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1575,21 +1665,12 @@ async def resolve_appeal(appeal_id: str, body: ResolveAppealRequest):
     """Resolve a pending appeal (analyst or admin)."""
     if body.resolution not in ("upheld", "overturned"):
         raise HTTPException(status_code=400, detail="resolution must be 'upheld' or 'overturned'")
-    from utils.db import _get_db, update_report_status
-    db = _get_db()
-    if db is None:
+    repo = get_repository()
+    if not repo.is_connected():
         raise HTTPException(status_code=503, detail="Database unavailable")
     try:
-        doc_ref = (
-            db.collection("artifacts")
-            .document("mwavuli")
-            .collection("public")
-            .document("data")
-            .collection("report_appeals")
-            .document(appeal_id)
-        )
-        doc = doc_ref.get()
-        if not doc.exists:
+        appeal_data = repo.get_appeal(appeal_id)
+        if appeal_data is None:
             raise HTTPException(status_code=404, detail="Appeal not found")
         update: dict = {
             "status": "resolved",
@@ -1598,12 +1679,11 @@ async def resolve_appeal(appeal_id: str, body: ResolveAppealRequest):
         }
         if body.notes:
             update["notes"] = body.notes
-        doc_ref.update(update)
+        repo.resolve_appeal(appeal_id, update)
         if body.resolution == "overturned":
-            appeal_data = doc.to_dict()
             linked_report_id = appeal_data.get("report_id")
             if linked_report_id:
-                update_report_status(linked_report_id, "reviewed")
+                repo.update_report_status(linked_report_id, "reviewed")
         log_audit_event("appeal_resolved", details={
             "appeal_id": appeal_id,
             "resolution": body.resolution,
@@ -1628,23 +1708,18 @@ async def export_stix(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid date: {e}")
 
-    dist = await asyncio.to_thread(analytics.get_risk_level_distribution, start_dt, end_dt)
-    # Fetch raw high-risk reports
-    from utils.db import _get_db
-    db = _get_db()
-    if db is None:
+    repo = get_repository()
+    if not repo.is_connected():
         raise HTTPException(status_code=503, detail="Database unavailable")
 
-    ref = (
-        db.collection("artifacts")
-        .document("mwavuli")
-        .collection("public")
-        .document("data")
-        .collection("reports")
+    high_reports = await asyncio.to_thread(
+        repo.query_reports,
+        start_date=start_dt,
+        end_date=end_dt,
+        risk_level="HIGH",
+        limit=500,
+        order_by_timestamp="asc",
     )
-    q = ref.where("risk_level", "==", "HIGH").order_by("timestamp").limit(500)
-    if start_dt:
-        q = ref.where("risk_level", "==", "HIGH").where("timestamp", ">=", start_dt).limit(500)
 
     objects = []
     identity_id = f"identity--{_uuid.uuid5(_uuid.NAMESPACE_URL, 'mwavuli')}"
@@ -1658,11 +1733,11 @@ async def export_stix(
         "identity_class": "system",
     })
 
-    for doc in q.stream():
-        d = doc.to_dict()
+    for d in high_reports:
+        report_id = d.get("id", "")
         ts = d.get("timestamp")
         ts_str = ts.isoformat() + "Z" if hasattr(ts, "isoformat") else str(ts)
-        indicator_id = f"indicator--{_uuid.uuid5(_uuid.NAMESPACE_URL, doc.id)}"
+        indicator_id = f"indicator--{_uuid.uuid5(_uuid.NAMESPACE_URL, report_id)}"
         objects.append({
             "type": "indicator",
             "spec_version": "2.1",
@@ -1672,7 +1747,7 @@ async def export_stix(
             "name": f"HIGH-risk content ({d.get('matched_keyword', 'N/A')})",
             "description": d.get("explanation", ""),
             "indicator_types": ["malicious-activity"],
-            "pattern": f"[content:value = '{doc.id}']",
+            "pattern": f"[content:value = '{report_id}']",
             "pattern_type": "stix",
             "valid_from": ts_str,
             "created_by_ref": identity_id,
