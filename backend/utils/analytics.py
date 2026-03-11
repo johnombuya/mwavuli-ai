@@ -583,10 +583,24 @@ def get_coordinated_campaigns(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
 ) -> List[Dict]:
-    """Return reports flagged as coordinated campaigns (raw scan)."""
+    """Return reports flagged as coordinated campaigns, grouped by narrative similarity."""
     try:
         reports = _query_raw_reports(start_date, end_date)
-        return [r for r in reports if r.get("coordinated_campaign")]
+        flagged = [r for r in reports if r.get("coordinated_campaign")]
+        if not flagged:
+            return []
+
+        # Group by sender and compute campaign-level stats
+        sender_groups: Dict[str, List[Dict]] = defaultdict(list)
+        for r in flagged:
+            sender_groups[r.get("sender_hash", "unknown")].append(r)
+
+        return {
+            "campaigns": flagged,
+            "unique_senders": len(sender_groups),
+            "total_flagged": len(flagged),
+            "risk_breakdown": dict(Counter(r.get("risk_level", "UNKNOWN") for r in flagged)),
+        }
     except Exception as e:
         print(f"Error getting coordinated campaigns: {e}")
         return []
@@ -642,3 +656,101 @@ def get_status_counts(
     except Exception as e:
         print(f"Error getting status counts from aggregates: {e}")
         return {}
+
+
+# ── Topic Clusters & Lexicon Suggestions ─────────────────────────
+
+
+def get_topic_clusters(active_only: bool = True) -> List[Dict]:
+    """Return topic clusters from the report_clusters table."""
+    try:
+        repo = get_repository()
+        client = getattr(repo, "_get_client", lambda: None)()
+        if client is None:
+            return []
+        query = client.table("report_clusters").select("*")
+        if active_only:
+            query = query.eq("is_active", True)
+        query = query.order("size", desc=True).limit(50)
+        result = query.execute()
+        return result.data or []
+    except Exception as e:
+        print(f"Error getting topic clusters: {e}")
+        return []
+
+
+def get_lexicon_suggestions(min_high_pct: float = 30.0, top_n: int = 20) -> List[Dict]:
+    """
+    Suggest new keywords by cross-referencing cluster keywords with the
+    existing lexicon. Returns terms that appear frequently in HIGH-risk
+    clusters but are NOT already in the lexicon.
+    """
+    try:
+        from utils.lexicon import HIGH_RISK_KEYWORDS, MEDIUM_RISK_KEYWORDS
+
+        existing = set(kw.lower() for kw in HIGH_RISK_KEYWORDS + MEDIUM_RISK_KEYWORDS)
+        clusters = get_topic_clusters(active_only=True)
+        if not clusters:
+            return []
+
+        suggestions: Counter = Counter()
+        suggestion_context: Dict[str, Dict] = {}
+
+        for cluster in clusters:
+            risk = _ensure_dict(cluster.get("risk_breakdown"))
+            total = sum(int(v) for v in risk.values()) or 1
+            high_count = int(risk.get("HIGH", 0))
+            high_pct = high_count / total * 100
+
+            if high_pct < min_high_pct:
+                continue
+
+            keywords = cluster.get("top_keywords", [])
+            if isinstance(keywords, str):
+                try:
+                    keywords = _json.loads(keywords)
+                except (ValueError, TypeError):
+                    keywords = []
+
+            county_dist = _ensure_dict(cluster.get("county_distribution"))
+
+            for kw in keywords:
+                kw_lower = kw.lower()
+                if kw_lower in existing:
+                    continue
+                if len(kw_lower) < 3:
+                    continue
+                suggestions[kw_lower] += cluster.get("size", 1)
+                if kw_lower not in suggestion_context:
+                    suggestion_context[kw_lower] = {
+                        "keyword": kw,
+                        "cluster_count": 0,
+                        "total_reports": 0,
+                        "high_reports": 0,
+                        "counties": Counter(),
+                    }
+                ctx = suggestion_context[kw_lower]
+                ctx["cluster_count"] += 1
+                ctx["total_reports"] += total
+                ctx["high_reports"] += high_count
+                for county, cnt in county_dist.items():
+                    ctx["counties"][county] += int(cnt)
+
+        results = []
+        for kw, count in suggestions.most_common(top_n):
+            ctx = suggestion_context[kw]
+            results.append({
+                "keyword": ctx["keyword"],
+                "frequency": count,
+                "cluster_count": ctx["cluster_count"],
+                "total_reports": ctx["total_reports"],
+                "high_reports": ctx["high_reports"],
+                "top_counties": [
+                    {"county": c, "count": n}
+                    for c, n in ctx["counties"].most_common(3)
+                ],
+            })
+        return results
+    except Exception as e:
+        print(f"Error getting lexicon suggestions: {e}")
+        return []

@@ -64,3 +64,6 @@ firebase_export/
 
 # Model cache (can be large)
 .cache/
+
+# Trained model artifacts (large binary files)
+backend/models/artifacts/

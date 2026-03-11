@@ -65,6 +65,21 @@ class ReportRepository(ABC):
         """Return True if *sender_hash* has >= *threshold* reports in the last *window_minutes*."""
         ...
 
+    def detect_semantic_coordination(
+        self,
+        embedding: List[float],
+        window_minutes: int = 120,
+        similarity_threshold: float = 0.85,
+        min_unique_senders: int = 3,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Find semantically similar recent reports from different senders.
+
+        Returns a dict with campaign info if coordination is detected, else None.
+        Default implementation returns None (override in providers that support vectors).
+        """
+        return None
+
     # ── Aggregates ───────────────────────────────────────────────────
 
     @abstractmethod

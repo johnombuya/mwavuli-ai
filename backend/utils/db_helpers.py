@@ -218,6 +218,12 @@ def enrich_report(data: dict) -> dict:
     if content_hash:
         report["content_hash"] = content_hash
 
+    # Compute text embedding for semantic similarity (returns None if unavailable)
+    from models.embedder import embed as _embed_text
+    embedding = _embed_text(text) if text else None
+    if embedding is not None:
+        report["embedding"] = embedding
+
     if data.get("coordinated_campaign"):
         report["coordinated_campaign"] = True
     if data.get("recommended_action"):

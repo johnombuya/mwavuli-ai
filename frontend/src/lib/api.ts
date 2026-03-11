@@ -61,6 +61,29 @@ export type BaseFilterParams = {
   org_id?: string;
 };
 
+export type TopicCluster = {
+  id: string;
+  computed_at: string;
+  cluster_label: number;
+  size: number;
+  representative_text?: string;
+  top_keywords: string[];
+  county_distribution: Record<string, number>;
+  risk_breakdown: Record<string, number>;
+  first_seen?: string;
+  last_seen?: string;
+  is_active: boolean;
+};
+
+export type LexiconSuggestion = {
+  keyword: string;
+  frequency: number;
+  cluster_count: number;
+  total_reports: number;
+  high_reports: number;
+  top_counties: { county: string; count: number }[];
+};
+
 // Analytics API endpoints
 export const analyticsApi = {
   getSummary: async (params?: BaseFilterParams): Promise<SummaryStats> => {
@@ -156,6 +179,16 @@ export const analyticsApi = {
 
   getDailySummary: async (): Promise<{ summary: string; stats: SummaryStats }> => {
     const response = await api.get('/v1/analytics/daily-summary');
+    return response.data;
+  },
+
+  getTopicClusters: async (): Promise<{ clusters: TopicCluster[]; count: number }> => {
+    const response = await api.get('/v1/analytics/topic-clusters');
+    return response.data;
+  },
+
+  getLexiconSuggestions: async (params?: { min_high_pct?: number; top_n?: number }): Promise<{ suggestions: LexiconSuggestion[]; count: number }> => {
+    const response = await api.get('/v1/analytics/lexicon-suggestions', { params });
     return response.data;
   },
 };

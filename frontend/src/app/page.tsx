@@ -18,6 +18,8 @@ import { UrlMentionRiskChart } from '@/components/charts/UrlMentionRiskChart';
 import { NationalRiskIndicator } from '@/components/dashboard/NationalRiskIndicator';
 import { DailySummaryCard } from '@/components/dashboard/DailySummaryCard';
 import { CoordinatedCampaignsWidget } from '@/components/dashboard/CoordinatedCampaignsWidget';
+import { TopicClustersWidget } from '@/components/dashboard/TopicClustersWidget';
+import { LexiconSuggestionsWidget } from '@/components/dashboard/LexiconSuggestionsWidget';
 import { adminApi } from '@/lib/api';
 
 const chartCardClass =
@@ -149,6 +151,18 @@ export default function DashboardPage() {
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>Coordinated campaigns</h2>
             <CoordinatedCampaignsWidget />
+          </div>
+        </div>
+
+        {/* Intelligence section: clusters & lexicon suggestions */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>Narrative clusters</h2>
+            <TopicClustersWidget />
+          </div>
+          <div className={chartCardClass}>
+            <h2 className={chartTitleClass}>Suggested keywords</h2>
+            <LexiconSuggestionsWidget />
           </div>
         </div>
       </div>

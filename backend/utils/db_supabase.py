@@ -257,6 +257,59 @@ class SupabaseRepository(ReportRepository):
             print(f"Error in coordinated detection: {e}")
             return False
 
+    def detect_semantic_coordination(
+        self,
+        embedding: list,
+        window_minutes: int = 120,
+        similarity_threshold: float = 0.85,
+        min_unique_senders: int = 3,
+    ):
+        """Find semantically similar reports from different senders using pgvector."""
+        client = self._get_client()
+        if client is None or not embedding:
+            return None
+        try:
+            cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
+            vec_str = "[" + ",".join(str(x) for x in embedding) + "]"
+            result = client.rpc(
+                "match_similar_reports",
+                {
+                    "query_embedding": vec_str,
+                    "similarity_threshold": similarity_threshold,
+                    "match_count": 50,
+                    "since_ts": _iso(cutoff),
+                },
+            ).execute()
+            rows = result.data or []
+            if not rows:
+                return None
+            unique_senders = set()
+            similar_reports = []
+            for r in rows:
+                unique_senders.add(r.get("sender_hash", "unknown"))
+                similar_reports.append({
+                    "id": r.get("id"),
+                    "sender_hash": r.get("sender_hash"),
+                    "similarity": r.get("similarity"),
+                    "text": (r.get("text") or "")[:200],
+                    "risk_level": r.get("risk_level"),
+                    "timestamp": r.get("timestamp"),
+                })
+            if len(unique_senders) >= min_unique_senders:
+                return {
+                    "is_coordinated": True,
+                    "unique_senders": len(unique_senders),
+                    "similar_count": len(similar_reports),
+                    "avg_similarity": sum(
+                        r["similarity"] for r in similar_reports
+                    ) / len(similar_reports),
+                    "reports": similar_reports[:10],
+                }
+            return None
+        except Exception as e:
+            print(f"Error in semantic coordination detection: {e}")
+            return None
+
     # ── Aggregates ───────────────────────────────────────────────────
 
     def get_aggregate_docs(

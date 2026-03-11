@@ -418,9 +418,18 @@ async def verify_text(request: VerifyTextRequest):
         if result.kenyan_model_score is not None:
             report_data["kenyan_model_score"] = result.kenyan_model_score
 
-        from utils.db import detect_coordinated_activity
+        from utils.db import detect_coordinated_activity, get_repository
         sender_hash = _anonymize_sender(request.sender_id)
         is_coordinated = detect_coordinated_activity(sender_hash)
+
+        # Semantic coordination: check if similar content is being posted by multiple senders
+        semantic_coord = None
+        embedding = report_data.get("embedding")
+        if embedding:
+            semantic_coord = get_repository().detect_semantic_coordination(embedding)
+        if semantic_coord and semantic_coord.get("is_coordinated"):
+            is_coordinated = True
+
         if is_coordinated:
             report_data["coordinated_campaign"] = True
 
@@ -1554,12 +1563,39 @@ async def get_coordinated_campaigns_endpoint(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
 ):
-    """Return reports flagged as coordinated campaigns."""
+    """Return reports flagged as coordinated campaigns with sender/risk metadata."""
     try:
         start_dt = datetime.fromisoformat(start_date) if start_date else None
         end_dt = datetime.fromisoformat(end_date) if end_date else None
         results = await asyncio.to_thread(analytics.get_coordinated_campaigns, start_dt, end_dt)
+        if isinstance(results, dict):
+            return results
         return {"campaigns": results, "count": len(results)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/analytics/topic-clusters", tags=["Analytics"])
+async def get_topic_clusters_endpoint():
+    """Return active narrative clusters discovered by HDBSCAN."""
+    try:
+        clusters = await asyncio.to_thread(analytics.get_topic_clusters, True)
+        return {"clusters": clusters, "count": len(clusters)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/analytics/lexicon-suggestions", tags=["Analytics"])
+async def get_lexicon_suggestions_endpoint(
+    min_high_pct: float = Query(30.0, description="Minimum HIGH-risk % for a cluster to contribute"),
+    top_n: int = Query(20, description="Max suggestions to return"),
+):
+    """Suggest new keywords from high-risk clusters not already in the lexicon."""
+    try:
+        suggestions = await asyncio.to_thread(
+            analytics.get_lexicon_suggestions, min_high_pct, top_n
+        )
+        return {"suggestions": suggestions, "count": len(suggestions)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
