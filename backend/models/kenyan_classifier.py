@@ -1,14 +1,16 @@
 """
 Fine-tuned Kenyan risk classifier.
 
-Loads a locally-saved DistilBERT/XLM-R checkpoint trained on Kenyan
-political text and returns a risk label + confidence score.
+Loads a DistilBERT/XLM-R checkpoint trained on Kenyan political text
+and returns a risk label + confidence score.
 
-Model artifact directory: backend/models/artifacts/kenyan_classifier/
-If the artifact is absent the classifier silently returns None so that
-the rest of the pipeline continues.
+Loading priority:
+1. HuggingFace Hub  -- if HF_MODEL_REPO env var is set
+2. Local artifacts  -- backend/models/artifacts/kenyan_classifier/
+3. Graceful skip    -- returns None so the rest of the pipeline continues
 """
 
+import os
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -27,20 +29,38 @@ def _ensure_loaded() -> bool:
     if _loaded:
         return _model is not None
     _loaded = True
-    if not _MODEL_DIR.exists():
-        return False
+
+    hf_repo = os.getenv("HF_MODEL_REPO", "").strip()
+    hf_token = os.getenv("HF_TOKEN", "").strip() or None
+
     try:
         from transformers import (
             AutoModelForSequenceClassification,
             AutoTokenizer,
         )
-        _tokenizer = AutoTokenizer.from_pretrained(str(_MODEL_DIR))
-        _model = AutoModelForSequenceClassification.from_pretrained(
-            str(_MODEL_DIR),
-        )
-        _model.eval()
-        print("[kenyan_classifier] Model loaded from", _MODEL_DIR)
-        return True
+
+        if hf_repo:
+            try:
+                _tokenizer = AutoTokenizer.from_pretrained(hf_repo, token=hf_token)
+                _model = AutoModelForSequenceClassification.from_pretrained(
+                    hf_repo, token=hf_token,
+                )
+                _model.eval()
+                print(f"[kenyan_classifier] Model loaded from Hub: {hf_repo}")
+                return True
+            except Exception as e:
+                print(f"[kenyan_classifier] Hub load failed ({e}), trying local...")
+
+        if _MODEL_DIR.exists():
+            _tokenizer = AutoTokenizer.from_pretrained(str(_MODEL_DIR))
+            _model = AutoModelForSequenceClassification.from_pretrained(
+                str(_MODEL_DIR),
+            )
+            _model.eval()
+            print("[kenyan_classifier] Model loaded from", _MODEL_DIR)
+            return True
+
+        return False
     except Exception as e:
         print(f"[kenyan_classifier] Could not load model: {e}")
         return False

@@ -27,14 +27,17 @@ export function NationalRiskIndicator() {
 
   if (!data || (data.total_reports <= 1 && data.high_pct === 0 && data.medium_pct === 0)) {
     return (
-      <div className="bg-slate-100 text-slate-600 rounded-xl ring-2 ring-slate-300 p-5 flex items-center justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest opacity-70">National risk status</p>
-          <p className="text-2xl font-bold mt-1">NO DATA</p>
+      <div className="bg-slate-100 text-slate-600 rounded-xl ring-2 ring-slate-300 p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest opacity-70">National risk status</p>
+            <p className="text-2xl font-bold mt-1">NO DATA</p>
+          </div>
+          <div className="text-right text-sm opacity-80">
+            <p>No reports in the last 24 hours</p>
+          </div>
         </div>
-        <div className="text-right text-sm opacity-80">
-          <p>No reports in the last 24 hours</p>
-        </div>
+        <p className="text-xs text-slate-500 mt-2">Overall risk level based on the percentage of HIGH and MEDIUM risk reports in the last 24 hours.</p>
       </div>
     );
   }
@@ -42,15 +45,18 @@ export function NationalRiskIndicator() {
   const style = colorMap[data.level] ?? colorMap.GREEN;
 
   return (
-    <div className={`${style.bg} ${style.text} rounded-xl ring-2 ${style.ring} p-5 flex items-center justify-between`}>
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest opacity-70">National risk status</p>
-        <p className="text-2xl font-bold mt-1">{style.label}</p>
+    <div className={`${style.bg} ${style.text} rounded-xl ring-2 ${style.ring} p-5`}>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest opacity-70">National risk status</p>
+          <p className="text-2xl font-bold mt-1">{style.label}</p>
+        </div>
+        <div className="text-right text-sm opacity-80">
+          <p>{data.high_pct}% HIGH &middot; {data.medium_pct}% MEDIUM</p>
+          <p>{data.total_reports} reports (24 h)</p>
+        </div>
       </div>
-      <div className="text-right text-sm opacity-80">
-        <p>{data.high_pct}% HIGH &middot; {data.medium_pct}% MEDIUM</p>
-        <p>{data.total_reports} reports (24 h)</p>
-      </div>
+      <p className="text-xs opacity-60 mt-2">Overall risk level based on the percentage of HIGH and MEDIUM risk reports in the last 24 hours.</p>
     </div>
   );
 }

@@ -24,7 +24,8 @@ import { adminApi } from '@/lib/api';
 
 const chartCardClass =
   'bg-white rounded-xl border border-slate-200/60 shadow-sm p-6';
-const chartTitleClass = 'text-xl font-semibold text-slate-900 mb-4';
+const chartTitleClass = 'text-xl font-semibold text-slate-900 mb-1';
+const chartDescClass = 'text-sm text-slate-500 mb-3';
 
 export default function DashboardPage() {
   const { t } = useLanguage();
@@ -98,6 +99,7 @@ export default function DashboardPage() {
 
         {/* Summary Cards */}
         <div className="mb-8">
+          <p className="text-sm text-slate-500 mb-3">Cumulative report counts across all time, broken down by risk category.</p>
           <SummaryCards dateRange={dateRange} />
         </div>
 
@@ -105,13 +107,16 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>{t.riskDistribution}</h2>
+            <p className={chartDescClass}>Proportion of reports classified as HIGH, MEDIUM, or LOW risk.</p>
             <RiskDistributionChart dateRange={dateRange} />
           </div>
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>{t.topKeywords}</h2>
+            <p className={chartDescClass}>How flagged keyword volumes change over time &mdash; useful for spotting emerging narratives.</p>
             <KeywordTrendsChart dateRange={dateRange} />
             <div className="mt-4 border-t pt-4 text-sm text-slate-600">
-              <p className="font-medium mb-2">Top tokens in high-risk reports</p>
+              <p className="font-medium mb-1">Top tokens in high-risk reports</p>
+              <p className={chartDescClass}>Most frequent tokens found in high-risk reports.</p>
               <TopTokensChart dateRange={dateRange} />
             </div>
           </div>
@@ -120,36 +125,42 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 gap-6 mb-8">
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>{t.toxicityTrends}</h2>
+            <p className={chartDescClass}>Average toxicity scores over time, tracking changes in content severity.</p>
             <ToxicityTrendsChart dateRange={dateRange} />
           </div>
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>{t.hourlyPatterns}</h2>
+            <p className={chartDescClass}>Report volume by hour of day &mdash; reveals when harmful content peaks.</p>
             <HourlyPatternsChart dateRange={dateRange} />
           </div>
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>{t.countyRiskAnalysis}</h2>
+            <p className={chartDescClass}>Geographic breakdown of risk levels across Kenyan counties.</p>
             <CountyHeatmap dateRange={dateRange} />
           </div>
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>Detection methods vs risk</h2>
+            <p className={chartDescClass}>Which detection methods (Lexicon, Detoxify, Kenyan Model, AI) are triggering at each risk level.</p>
             <DetectionRiskChart dateRange={dateRange} />
           </div>
           <div className={chartCardClass}>
-            <h2 className={chartTitleClass}>
-              Confidence score distribution
-            </h2>
+            <h2 className={chartTitleClass}>Confidence score distribution</h2>
+            <p className={chartDescClass}>Histogram of model confidence scores &mdash; higher confidence means more certain classifications.</p>
             <ConfidenceHistogramChart dateRange={dateRange} />
           </div>
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>URLs &amp; mentions vs risk</h2>
+            <p className={chartDescClass}>Relationship between shared URLs/mentions and their associated risk levels.</p>
             <UrlMentionRiskChart dateRange={dateRange} />
           </div>
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>Recent reports</h2>
+            <p className={chartDescClass}>The latest reports received, showing risk level and key details.</p>
             <RecentReports />
           </div>
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>Coordinated campaigns</h2>
+            <p className={chartDescClass}>Groups of reports from multiple senders sharing the same narrative &mdash; potential coordinated activity.</p>
             <CoordinatedCampaignsWidget />
           </div>
         </div>
@@ -158,10 +169,12 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>Narrative clusters</h2>
+            <p className={chartDescClass}>Automatically discovered themes from report content, grouped by semantic similarity using AI embeddings.</p>
             <TopicClustersWidget />
           </div>
           <div className={chartCardClass}>
             <h2 className={chartTitleClass}>Suggested keywords</h2>
+            <p className={chartDescClass}>Keywords found frequently in high-risk clusters that aren&apos;t yet in the detection lexicon &mdash; candidates for review.</p>
             <LexiconSuggestionsWidget />
           </div>
         </div>

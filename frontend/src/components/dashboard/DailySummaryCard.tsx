@@ -19,9 +19,10 @@ export function DailySummaryCard() {
 
   return (
     <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-5">
-      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">
+      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-1">
         Daily summary (24 h)
       </p>
+      <p className="text-xs text-slate-400 mb-2">Snapshot of today&apos;s report activity &mdash; total received and breakdown by risk level.</p>
       {data?.summary ? (
         <p className="text-sm text-slate-800 leading-relaxed">{data.summary}</p>
       ) : (
