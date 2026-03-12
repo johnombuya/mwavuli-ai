@@ -28,9 +28,9 @@ type TranslationMap = Record<UiLang, TranslationDict>;
 
 export const translations: TranslationMap = {
   en: {
-    dashboardTitle: 'Political risk intelligence dashboard',
+    dashboardTitle: 'Mwavuli Intelligence Dashboard',
     dashboardSubtitle:
-      'Monitor harmful and high-risk political content and narratives across Kenyan online spaces in near real-time.',
+      'Monitor harmful content, misinformation, and coordinated narratives across Kenyan online spaces in near real-time.',
     riskDistribution: 'Risk distribution',
     topKeywords: 'Top keywords',
     toxicityTrends: 'Toxicity trends',
@@ -51,9 +51,9 @@ export const translations: TranslationMap = {
     explanation: 'Why this content was flagged',
   },
   sw: {
-    dashboardTitle: 'Dashibodi ya taarifa za hatari kisiasa',
+    dashboardTitle: 'Dashibodi ya Akili ya Mwavuli',
     dashboardSubtitle:
-      'Fuatilia maudhui hatarishi na hoja zenye hatari za kisiasa katika majukwaa ya mtandaoni nchini Kenya karibu na wakati halisi.',
+      'Fuatilia maudhui hatarishi, habari za kupotosha, na hoja zinazoratibiwa katika majukwaa ya mtandaoni nchini Kenya karibu na wakati halisi.',
     riskDistribution: 'Usambazaji wa hatari',
     topKeywords: 'Maneno muhimu yanayotumika sana',
     toxicityTrends: 'Mwenendo wa ukatili wa lugha',
@@ -74,9 +74,9 @@ export const translations: TranslationMap = {
     explanation: 'Sababu ya taarifa hii kutiwa alama',
   },
   sheng: {
-    dashboardTitle: 'Political risk dashboard',
+    dashboardTitle: 'Mwavuli Intelligence Dashboard',
     dashboardSubtitle:
-      'Cheki mabonga na content za siasa zenye zinaweza kuiweka nchi kwa risk online.',
+      'Cheki content mbaya, fake news, na campaigns za coordinated kwa mtandao wa Kenya in real-time.',
     riskDistribution: 'Viwango vya risk',
     topKeywords: 'Maneno zenye zinarudi sana',
     toxicityTrends: 'Toxicity imekuwa aje',
