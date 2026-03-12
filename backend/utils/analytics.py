@@ -754,3 +754,161 @@ def get_lexicon_suggestions(min_high_pct: float = 30.0, top_n: int = 20) -> List
     except Exception as e:
         print(f"Error getting lexicon suggestions: {e}")
         return []
+
+
+# ---------------------------------------------------------------------------
+# Executive summary (LLM-generated)
+# ---------------------------------------------------------------------------
+
+def generate_executive_summary() -> Dict:
+    """Gather dashboard data and produce a plain-English intelligence brief.
+
+    Uses the LLM_PROVIDER setting (gemini/ollama/auto) to generate the prose.
+    Returns {"summary": str, "generated_at": str, "data": dict}.
+    """
+    import os
+    import urllib.request
+    from datetime import timezone
+
+    risk = get_national_risk_level()
+    end_dt = datetime.utcnow()
+    start_dt = end_dt - timedelta(hours=24)
+    stats = get_summary_stats(start_dt, end_dt)
+    campaigns = get_coordinated_campaigns(start_dt, end_dt)
+    clusters = get_topic_clusters(active_only=True)
+
+    total = stats.get("total_reports", 0)
+    risk_dist = stats.get("risk_distribution", {})
+    top_counties = stats.get("top_counties", [])
+    top_kw = stats.get("top_keywords", [])
+
+    county_str = ", ".join(f"{c['county']} ({c['count']})" for c in top_counties[:5]) or "none"
+    kw_str = ", ".join(f"{k['keyword']}" for k in top_kw[:5]) or "none"
+
+    campaign_count = 0
+    if isinstance(campaigns, dict):
+        campaign_count = campaigns.get("total_flagged", len(campaigns.get("campaigns", [])))
+    elif isinstance(campaigns, list):
+        campaign_count = len(campaigns)
+
+    cluster_summaries = []
+    for c in clusters[:3]:
+        kws = c.get("top_keywords", [])
+        if isinstance(kws, str):
+            try:
+                kws = _json.loads(kws)
+            except (ValueError, TypeError):
+                kws = []
+        label = ", ".join(kws[:3]) if kws else f"Cluster #{c.get('cluster_label', '?')}"
+        cluster_summaries.append(f"{label} ({c.get('size', 0)} reports)")
+
+    cluster_str = "; ".join(cluster_summaries) if cluster_summaries else "none detected"
+
+    data_block = {
+        "threat_level": risk.get("level", "GREEN"),
+        "total_reports": total,
+        "high_pct": risk.get("high_pct", 0),
+        "medium_pct": risk.get("medium_pct", 0),
+        "risk_distribution": risk_dist,
+        "top_counties": county_str,
+        "coordinated_campaigns": campaign_count,
+        "narrative_clusters": cluster_str,
+        "top_keywords": kw_str,
+    }
+
+    prompt = (
+        "You are a security intelligence analyst writing for a government decision-maker. "
+        "Write a 3-4 sentence executive brief. Be specific about counties, threats, and trends. "
+        "Do not use bullet points. Use plain prose.\n\n"
+        f"Data: {total} reports in the last 24 hours. Threat level: {risk.get('level', 'GREEN')}. "
+        f"{risk.get('high_pct', 0)}% HIGH risk, {risk.get('medium_pct', 0)}% MEDIUM risk. "
+        f"Risk breakdown: {risk_dist.get('HIGH', 0)} HIGH, {risk_dist.get('MEDIUM', 0)} MEDIUM, {risk_dist.get('LOW', 0)} LOW. "
+        f"Top counties by activity: {county_str}. "
+        f"Coordinated campaigns detected: {campaign_count}. "
+        f"Active narrative clusters: {cluster_str}. "
+        f"Top keywords: {kw_str}.\n\n"
+        "Write the executive brief now."
+    )
+
+    summary = _call_llm_for_summary(prompt)
+
+    if not summary:
+        summary = (
+            f"Threat level is {risk.get('level', 'GREEN')}. "
+            f"{total} reports analyzed in the last 24 hours — "
+            f"{risk_dist.get('HIGH', 0)} HIGH risk, {risk_dist.get('MEDIUM', 0)} MEDIUM, "
+            f"{risk_dist.get('LOW', 0)} LOW. "
+            f"Most active counties: {county_str}. "
+            f"{campaign_count} coordinated campaign{'s' if campaign_count != 1 else ''} detected."
+        )
+
+    return {
+        "summary": summary,
+        "generated_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+        "data": data_block,
+    }
+
+
+def _call_llm_for_summary(prompt: str) -> Optional[str]:
+    """Route an LLM call through LLM_PROVIDER for summary generation."""
+    import os
+    import urllib.request
+
+    provider = os.getenv("LLM_PROVIDER", "auto").strip().lower()
+    result = None
+
+    if provider in ("gemini", "auto"):
+        result = _call_gemini_summary(prompt)
+
+    if result is None and provider in ("ollama", "auto"):
+        result = _call_ollama_summary(prompt)
+
+    return result
+
+
+def _call_gemini_summary(prompt: str) -> Optional[str]:
+    """Generate summary via Gemini."""
+    import os
+    try:
+        from google import genai
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not api_key or api_key == "your_gemini_api_key_here":
+            return None
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        return response.text.strip()
+    except Exception as e:
+        print(f"[exec-summary] Gemini error: {e}")
+        return None
+
+
+def _call_ollama_summary(prompt: str) -> Optional[str]:
+    """Generate summary via Ollama."""
+    import os
+    import urllib.request
+
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip()
+    model = os.getenv("OLLAMA_MODEL", "llama3").strip()
+
+    body = _json.dumps({
+        "model": model,
+        "prompt": prompt,
+        "system": "You are a concise security intelligence analyst. Write in plain prose for decision-makers.",
+        "stream": False,
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            f"{base_url}/api/generate",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = _json.loads(resp.read().decode())
+            return data.get("response", "").strip() or None
+    except Exception as e:
+        print(f"[exec-summary] Ollama error: {e}")
+        return None

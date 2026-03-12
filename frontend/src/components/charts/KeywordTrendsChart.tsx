@@ -27,11 +27,11 @@ export function KeywordTrendsChart({ dateRange }: KeywordTrendsChartProps) {
   }
 
   return (
-    <ResponsiveContainer width="100%" height={300}>
+    <ResponsiveContainer width="100%" height={Math.max(300, data.keywords.length * 30)}>
       <BarChart data={data.keywords} layout="vertical">
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis type="number" />
-        <YAxis dataKey="keyword" type="category" width={140} />
+        <YAxis dataKey="keyword" type="category" width={140} interval={0} tick={{ fontSize: 11 }} />
         <Tooltip />
         <Legend />
         <Bar dataKey="count" fill="#0284c7" name="Lexicon hits" />

@@ -79,6 +79,35 @@ def get_keyword_context(keyword: str, sector: str = "political") -> str:
     )
 
 
+def detect_sector(text: str) -> Optional[str]:
+    """Auto-detect the most likely sector by checking all lexicon keyword sets.
+
+    Returns the sector whose keywords matched with the highest severity,
+    or ``None`` if no keywords matched in any sector.
+    """
+    text_lower = text.lower()
+    best_sector: Optional[str] = None
+    best_weight = 0
+
+    for sector in _VALID_SECTORS:
+        data = _load_sector(sector)
+        for kw in data["high"]:
+            if kw.lower() in text_lower:
+                if 2 > best_weight:
+                    best_weight = 2
+                    best_sector = sector
+                break
+        if best_weight < 2:
+            for kw in data["medium"]:
+                if kw.lower() in text_lower:
+                    if 1 > best_weight:
+                        best_weight = 1
+                        best_sector = sector
+                    break
+
+    return best_sector
+
+
 def _default_csv_path() -> Path:
     """
     Compute default path to the optional lexicon CSV at repo root.

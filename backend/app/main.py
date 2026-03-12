@@ -389,23 +389,44 @@ async def verify_text(request: VerifyTextRequest):
 
         # Analyze the text (pass sector for sector-specific lexicon)
         result = await analyzer.analyze(request.text, sector=request.sector)
-        
+
+        # ---- Auto-detect sector & county (Tier 1: local, Tier 2: Gemini) ----
+        from utils.db_helpers import detect_county as _detect_county
+        from utils.lexicon import detect_sector as _detect_sector
+
+        effective_county = request.county or "unknown"
+        effective_sector = request.sector
+
+        if effective_county == "unknown":
+            local_county = _detect_county(request.text)
+            if local_county:
+                effective_county = local_county
+            elif result.detected_county:
+                effective_county = result.detected_county
+
+        if effective_sector == "political":
+            local_sector = _detect_sector(request.text)
+            if local_sector:
+                effective_sector = local_sector
+            elif result.detected_sector:
+                effective_sector = result.detected_sector
+
         # Prepare report data
         report_data = {
             "text": request.text,
             "risk_level": result.risk_level,
             "language": "auto-detect",
-            "county": request.county or "unknown",
+            "county": effective_county,
             "sender_id": request.sender_id,
             "scores": result.scores,
-            "sector": request.sector,
+            "sector": effective_sector,
         }
         if request.org_id:
             report_data["org_id"] = request.org_id
-        
+
         if result.matched_keyword:
             report_data["matched_keyword"] = result.matched_keyword
-        
+
         if result.gemini_context_flag:
             report_data["gemini_context_flag"] = True
         if result.explanation:
@@ -417,6 +438,14 @@ async def verify_text(request: VerifyTextRequest):
             report_data["kenyan_model_risk"] = result.kenyan_model_risk
         if result.kenyan_model_score is not None:
             report_data["kenyan_model_score"] = result.kenyan_model_score
+
+        # Store Gemini labels for knowledge distillation
+        if result.detected_sector:
+            report_data["gemini_sector"] = result.detected_sector
+        if result.detected_county:
+            report_data["gemini_county"] = result.detected_county
+        if result.gemini_reason:
+            report_data["gemini_reason"] = result.gemini_reason
 
         from utils.db import detect_coordinated_activity, get_repository
         sender_hash = _anonymize_sender(request.sender_id)
@@ -1519,6 +1548,16 @@ async def twilio_webhook_post(
             print(f"Twilio send error: {err}")
 
     return PlainTextResponse("", status_code=200)
+
+
+@app.get("/api/v1/analytics/executive-summary", tags=["Analytics"])
+async def get_executive_summary():
+    """AI-generated executive intelligence brief for decision-makers."""
+    try:
+        result = await asyncio.to_thread(analytics.generate_executive_summary)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/v1/analytics/national-risk-level", tags=["Analytics"])

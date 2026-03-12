@@ -42,11 +42,11 @@ export function CountyHeatmap({ dateRange }: CountyHeatmapProps) {
   }
 
   return (
-    <ResponsiveContainer width="100%" height={400}>
+    <ResponsiveContainer width="100%" height={Math.max(400, chartData.length * 30)}>
       <BarChart data={chartData} layout="vertical">
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis type="number" />
-        <YAxis dataKey="county" type="category" width={120} />
+        <YAxis dataKey="county" type="category" width={120} interval={0} tick={{ fontSize: 11 }} />
         <Tooltip />
         <Legend />
         <Bar dataKey="high" stackId="a" fill="#dc2626" name="High Risk" />

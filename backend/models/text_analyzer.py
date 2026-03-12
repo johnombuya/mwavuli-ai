@@ -51,6 +51,9 @@ load_dotenv()
 # Pre-bunking tip for all responses
 PREBUNKING_TIP = "For official election results, always visit iebc.or.ke"
 
+# LLM provider routing: "gemini", "ollama", or "auto" (try gemini then ollama)
+_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto").strip().lower()
+
 # Ollama / local LLM config
 _LOCAL_LLM_ENABLED = os.getenv("LOCAL_LLM_ENABLED", "false").lower() == "true"
 _OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -77,6 +80,9 @@ class AnalysisResult:
     kenyan_model_risk: Optional[str] = None
     kenyan_model_score: Optional[float] = None
     explanation_details: Optional[Dict] = None
+    detected_sector: Optional[str] = None
+    detected_county: Optional[str] = None
+    gemini_reason: Optional[str] = None
 
 
 class MwavuliAnalyzer:
@@ -158,7 +164,7 @@ class MwavuliAnalyzer:
 
     async def _call_ollama(self, prompt: str) -> Optional[str]:
         """Call the local Ollama LLM; returns response text or None."""
-        if not _LOCAL_LLM_ENABLED:
+        if not _LOCAL_LLM_ENABLED and _LLM_PROVIDER != "ollama":
             return None
         import urllib.request, json as _json
         url = f"{_OLLAMA_BASE_URL}/api/generate"
@@ -171,6 +177,45 @@ class MwavuliAnalyzer:
         except Exception as e:
             print(f"[ollama] Error: {e}")
             return None
+
+    async def _check_kenyan_context_ollama(self, text: str) -> Dict:
+        """Full context check via Ollama, returning flagged + sector + county."""
+        _empty = {"flagged": False, "reason": "", "sector": None, "county": None}
+        prompt = (
+            "Analyze this Kenyan text. Return ONLY a JSON object with:\n"
+            '{"flagged":bool,"reason":"...","sector":"...","county":"..."}\n'
+            "flagged: true if it contains hate speech, incitement, or ethnic targeting.\n"
+            "reason: brief explanation (empty string if benign).\n"
+            "sector: political, health, security, or fraud.\n"
+            "county: Kenyan county mentioned, or null.\n\n"
+            f'Text: "{text[:1500]}"\n'
+        )
+        resp = await self._call_ollama(prompt)
+        if not resp:
+            return _empty
+        try:
+            import json
+            raw = resp.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            result = json.loads(raw.strip())
+            return {
+                "flagged": bool(result.get("flagged", False)),
+                "reason": str(result.get("reason", "")),
+                "sector": result.get("sector") or None,
+                "county": result.get("county") or None,
+            }
+        except Exception as e:
+            print(f"[ollama] Failed to parse context response: {e}")
+            if resp and '"flagged": true' in resp.lower().replace(" ", ""):
+                return {"flagged": True, "reason": "", "sector": None, "county": None}
+            return _empty
+
+    def _ollama_enabled(self) -> bool:
+        """Return True if Ollama is available as an LLM backend."""
+        return _LOCAL_LLM_ENABLED or _LLM_PROVIDER == "ollama"
 
     def _ensure_detoxify_loaded(self):
         """
@@ -270,76 +315,64 @@ class MwavuliAnalyzer:
         else:
             return "LOW"
     
-    async def _check_kenyan_context(self, text: str) -> tuple[bool, str]:
+    async def _check_kenyan_context(self, text: str) -> Dict:
         """
-        Use Gemini to check for subtle Kenyan political incitement.
-        
-        This catches metaphors and coded language that standard models miss.
-        
-        Args:
-            text: The text to analyze
-            
-        Returns:
-            Tuple of (is_flagged, explanation)
+        Use Gemini to check for subtle Kenyan political incitement and
+        auto-detect sector and county.
+
+        Returns a dict with keys: flagged, reason, sector, county.
         """
+        _empty = {"flagged": False, "reason": "", "sector": None, "county": None}
         if self.gemini_client is None and self.gemini_model is None:
-            return False, ""
-        
-        prompt = f"""Analyze this text for subtle Kenyan political incitement or hate speech.
+            return _empty
 
-Look specifically for:
-1. Ethnic metaphors like "kwekwe", "madoadoa" (spots/stains), "kama mende" (like cockroaches)
-2. Coded political language that implies ethnic targeting
-3. Subtle calls for violence or ethnic exclusion
-4. Delegitimizing language about certain communities being "foreigners" or "not belonging"
-5. Historical references to past ethnic violence
+        prompt = (
+            "Analyze this Kenyan text. Return ONLY a JSON object with:\n"
+            '{"flagged":bool,"reason":"...","sector":"...","county":"..."}\n'
+            "flagged: true if it contains hate speech, incitement, or ethnic targeting.\n"
+            "reason: brief explanation (empty string if benign).\n"
+            "sector: political, health, security, or fraud.\n"
+            "county: Kenyan county mentioned, or null.\n\n"
+            f'Text: "{text[:1500]}"\n'
+        )
 
-Text to analyze: "{text}"
-
-Respond with ONLY a JSON object:
-{{"flagged": true/false, "reason": "brief explanation or empty string"}}
-
-If the text is benign, respond with: {{"flagged": false, "reason": ""}}
-"""
-        
         try:
             if GENAI_NEW_API and self.gemini_client:
-                # New API (google.genai) - uses client.generate_content
                 try:
-                    # Try async method first
                     response = await self.gemini_client.models.generate_content_async(
                         model='gemini-2.5-flash',
                         contents=prompt
                     )
                     result_text = response.text.strip()
                 except AttributeError:
-                    # Fallback to sync method if async not available
                     response = self.gemini_client.models.generate_content(
                         model='gemini-2.5-flash',
                         contents=prompt
                     )
                     result_text = response.text.strip()
             elif self.gemini_model:
-                # Deprecated API (google.generativeai)
                 response = await self.gemini_model.generate_content_async(prompt)
                 result_text = response.text.strip()
             else:
-                return False, ""
-            
-            # Parse the JSON response
+                return _empty
+
             import json
-            # Handle potential markdown code blocks
             if result_text.startswith("```"):
                 result_text = result_text.split("```")[1]
                 if result_text.startswith("json"):
                     result_text = result_text[4:]
-            
+
             result = json.loads(result_text)
-            return result.get("flagged", False), result.get("reason", "")
-            
+            return {
+                "flagged": bool(result.get("flagged", False)),
+                "reason": str(result.get("reason", "")),
+                "sector": result.get("sector") or None,
+                "county": result.get("county") or None,
+            }
+
         except Exception as e:
             print(f"Error in Gemini context check: {e}")
-            return False, ""
+            return _empty
     
     async def _translate_message(self, message: str, target_language: str) -> str:
         """
@@ -466,26 +499,54 @@ Respond with ONLY the translated text, nothing else."""
         kenyan_risk = kenyan_result[0] if kenyan_result else None
         kenyan_conf = kenyan_result[1] if kenyan_result else 0.0
 
-        # ---- Step 3: Gemini context (with circuit breaker & Ollama fallback) ----
+        # ---- Step 3: LLM context check (routed by LLM_PROVIDER) ----
         gemini_flagged = False
-        if self._gemini_available():
+        gemini_sector = None
+        gemini_county = None
+        gemini_reason = None
+
+        if _LLM_PROVIDER == "ollama":
+            ctx = await self._check_kenyan_context_ollama(text)
+            gemini_flagged = ctx["flagged"]
+            gemini_reason = ctx["reason"] or None
+            gemini_sector = ctx["sector"]
+            gemini_county = ctx["county"]
+        elif _LLM_PROVIDER == "gemini" and self._gemini_available():
             try:
-                gemini_flagged, _ = await self._check_kenyan_context(text)
+                ctx = await self._check_kenyan_context(text)
+                gemini_flagged = ctx["flagged"]
+                gemini_reason = ctx["reason"] or None
+                gemini_sector = ctx["sector"]
+                gemini_county = ctx["county"]
                 self._record_gemini_success()
             except Exception as e:
                 print(f"Gemini context check failed: {e}")
                 self._record_gemini_failure()
-                ollama_resp = await self._call_ollama(
-                    f'Is this Kenyan political incitement? Answer JSON {{"flagged":true/false}}: "{text[:500]}"'
-                )
-                if ollama_resp and '"flagged": true' in ollama_resp.lower().replace(" ", ""):
-                    gemini_flagged = True
-        elif _LOCAL_LLM_ENABLED:
-            ollama_resp = await self._call_ollama(
-                f'Is this Kenyan political incitement? Answer JSON {{"flagged":true/false}}: "{text[:500]}"'
-            )
-            if ollama_resp and '"flagged": true' in ollama_resp.lower().replace(" ", ""):
-                gemini_flagged = True
+        else:
+            # auto: try Gemini first, fall back to Ollama
+            if self._gemini_available():
+                try:
+                    ctx = await self._check_kenyan_context(text)
+                    gemini_flagged = ctx["flagged"]
+                    gemini_reason = ctx["reason"] or None
+                    gemini_sector = ctx["sector"]
+                    gemini_county = ctx["county"]
+                    self._record_gemini_success()
+                except Exception as e:
+                    print(f"Gemini context check failed: {e}")
+                    self._record_gemini_failure()
+                    if self._ollama_enabled():
+                        ctx = await self._check_kenyan_context_ollama(text)
+                        gemini_flagged = ctx["flagged"]
+                        gemini_reason = ctx["reason"] or None
+                        gemini_sector = ctx["sector"]
+                        gemini_county = ctx["county"]
+            elif self._ollama_enabled():
+                ctx = await self._check_kenyan_context_ollama(text)
+                gemini_flagged = ctx["flagged"]
+                gemini_reason = ctx["reason"] or None
+                gemini_sector = ctx["sector"]
+                gemini_county = ctx["county"]
 
         gemini_conf = 0.9 if gemini_flagged else 0.0
 
@@ -525,7 +586,14 @@ Respond with ONLY the translated text, nothing else."""
         messages = {"english": english_msg}
 
         translated = False
-        if self._gemini_available():
+
+        if _LLM_PROVIDER == "ollama":
+            sw = await self._call_ollama(f"Translate to Swahili: {english_msg}")
+            sh = await self._call_ollama(f"Translate to Kenyan Sheng: {english_msg}")
+            messages["swahili"] = sw or english_msg
+            messages["sheng"] = sh or english_msg
+            translated = True
+        elif _LLM_PROVIDER == "gemini" and self._gemini_available():
             try:
                 messages["swahili"] = await self._translate_message(english_msg, "Swahili")
                 messages["sheng"] = await self._translate_message(english_msg, "Sheng (Kenyan urban slang)")
@@ -533,13 +601,22 @@ Respond with ONLY the translated text, nothing else."""
                 self._record_gemini_success()
             except Exception:
                 self._record_gemini_failure()
-
-        if not translated and _LOCAL_LLM_ENABLED:
-            sw = await self._call_ollama(f"Translate to Swahili: {english_msg}")
-            sh = await self._call_ollama(f"Translate to Kenyan Sheng: {english_msg}")
-            messages["swahili"] = sw or english_msg
-            messages["sheng"] = sh or english_msg
-            translated = True
+        else:
+            # auto: try Gemini first, fall back to Ollama
+            if self._gemini_available():
+                try:
+                    messages["swahili"] = await self._translate_message(english_msg, "Swahili")
+                    messages["sheng"] = await self._translate_message(english_msg, "Sheng (Kenyan urban slang)")
+                    translated = True
+                    self._record_gemini_success()
+                except Exception:
+                    self._record_gemini_failure()
+            if not translated and self._ollama_enabled():
+                sw = await self._call_ollama(f"Translate to Swahili: {english_msg}")
+                sh = await self._call_ollama(f"Translate to Kenyan Sheng: {english_msg}")
+                messages["swahili"] = sw or english_msg
+                messages["sheng"] = sh or english_msg
+                translated = True
 
         if not translated:
             if risk_level == "HIGH":
@@ -571,8 +648,11 @@ Respond with ONLY the translated text, nothing else."""
             kenyan_model_risk=kenyan_risk,
             kenyan_model_score=round(kenyan_conf, 3) if kenyan_result else None,
             explanation_details=explanation_details,
+            detected_sector=gemini_sector,
+            detected_county=gemini_county,
+            gemini_reason=gemini_reason,
         )
-    
+
     def analyze_sync(self, text: str) -> AnalysisResult:
         """
         Synchronous version of analyze for non-async contexts.

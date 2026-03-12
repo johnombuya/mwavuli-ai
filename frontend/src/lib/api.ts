@@ -191,6 +191,11 @@ export const analyticsApi = {
     const response = await api.get('/v1/analytics/lexicon-suggestions', { params });
     return response.data;
   },
+
+  getExecutiveSummary: async (): Promise<{ summary: string; generated_at: string; data: Record<string, unknown> }> => {
+    const response = await api.get('/v1/analytics/executive-summary');
+    return response.data;
+  },
 };
 
 // Admin API

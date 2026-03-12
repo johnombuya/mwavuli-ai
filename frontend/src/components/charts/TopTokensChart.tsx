@@ -27,11 +27,11 @@ export function TopTokensChart({ dateRange }: TopTokensChartProps) {
   }
 
   return (
-    <ResponsiveContainer width="100%" height={300}>
+    <ResponsiveContainer width="100%" height={Math.max(300, data.tokens.length * 28)}>
       <BarChart data={data.tokens} layout="vertical">
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis type="number" />
-        <YAxis dataKey="token" type="category" width={140} />
+        <YAxis dataKey="token" type="category" width={140} interval={0} tick={{ fontSize: 11 }} />
         <Tooltip />
         <Legend />
         <Bar dataKey="count" fill="#16a34a" name="Token frequency" />

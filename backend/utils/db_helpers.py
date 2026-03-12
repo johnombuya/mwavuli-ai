@@ -9,7 +9,7 @@ import os
 import re
 import hashlib
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -82,6 +82,27 @@ URBAN_COUNTIES = {
     "Malindi", "Kitale", "Garissa", "Kakamega", "Meru", "Nyeri",
     "Machakos", "Embu", "Kiambu",
 }
+
+# Pre-build a regex that matches any county name as a whole word (case-insensitive).
+# Sorted longest-first so "Tharaka Nithi" matches before "Tharaka".
+_COUNTY_NAMES_SORTED = sorted(COUNTY_TO_REGION.keys(), key=len, reverse=True)
+_COUNTY_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(c) for c in _COUNTY_NAMES_SORTED) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def detect_county(text: str) -> Optional[str]:
+    """Return the first Kenyan county name mentioned in *text*, or None."""
+    if not text:
+        return None
+    m = _COUNTY_RE.search(text)
+    if m:
+        matched = m.group()
+        for name in _COUNTY_NAMES_SORTED:
+            if name.lower() == matched.lower():
+                return name
+    return None
 
 
 def anonymize_sender(sender_id: str) -> str:
@@ -210,6 +231,7 @@ def enrich_report(data: dict) -> dict:
         "source_type", "source_url", "created_by", "ingestion_job_id",
         "explanation", "explanation_details", "confidence_score",
         "kenyan_model_risk", "kenyan_model_score",
+        "gemini_sector", "gemini_county", "gemini_reason",
     ]
     for field in optional_fields:
         if field in data:
