@@ -35,19 +35,27 @@ const api: AxiosInstance = axios.create({
   },
 });
 
+const apiKey = process.env.NEXT_PUBLIC_API_KEY || '';
+
+if (apiKey) {
+  api.interceptors.request.use((config) => {
+    config.headers['X-API-Key'] = apiKey;
+    return config;
+  });
+}
+
 // Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Handle errors consistently
     if (error.response) {
-      // Server responded with error
+      if (error.response.status === 401) {
+        console.error('Auth Error: Invalid or missing API key. Set NEXT_PUBLIC_API_KEY in your .env');
+      }
       console.error('API Error:', error.response.status, error.response.data);
     } else if (error.request) {
-      // Request made but no response
       console.error('Network Error:', error.request);
     } else {
-      // Something else happened
       console.error('Error:', error.message);
     }
     return Promise.reject(error);

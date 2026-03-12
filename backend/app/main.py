@@ -162,6 +162,7 @@ class StatusSummaryResponse(BaseModel):
 
 
 # ---- API Key authentication middleware ----
+_AUTH_DISABLED = os.getenv("AUTH_DISABLED", "false").lower() == "true"
 _API_KEYS_RAW = os.getenv("API_KEYS", "")
 _API_KEYS = {k.strip() for k in _API_KEYS_RAW.split(",") if k.strip()} if _API_KEYS_RAW else set()
 
@@ -179,7 +180,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     Also enforces role-based access for admin endpoints."""
 
     async def dispatch(self, request: Request, call_next):
-        if not _API_KEYS:
+        if _AUTH_DISABLED or not _API_KEYS:
             return await call_next(request)
         path = request.url.path
         if path in _PUBLIC_PATHS or path.startswith("/docs") or path.startswith("/redoc"):
@@ -238,6 +239,13 @@ async def lifespan(app: FastAPI):
                     )
     except Exception as exc:
         print(f"Startup aggregate check skipped: {exc}")
+
+    if _AUTH_DISABLED:
+        print("AUTH: Disabled via AUTH_DISABLED=true (development mode)")
+    elif not _API_KEYS:
+        print("AUTH: No API_KEYS configured — all requests allowed (set API_KEYS to enable)")
+    else:
+        print(f"AUTH: Enabled with {len(_API_KEYS)} API key(s)")
 
     print("Mwavuli API ready.")
     yield
