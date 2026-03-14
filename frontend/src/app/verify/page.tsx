@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { verifyApi, type VerifyResponse } from '@/lib/api';
 
@@ -12,17 +12,85 @@ const RISK_COLORS: Record<string, string> = {
 
 const cardClass = 'bg-white rounded-xl border border-slate-200/60 shadow-sm p-6';
 
-type Mode = 'text' | 'image';
+type Mode = 'text' | 'image' | 'audio' | 'video';
+
+const MODE_LABELS: Record<Mode, string> = {
+  text: 'Text',
+  image: 'Image',
+  audio: 'Audio',
+  video: 'Video',
+};
+
+const ACCEPT_MAP: Record<string, string> = {
+  image: 'image/jpeg,image/png,image/webp,image/gif',
+  audio: 'audio/*',
+  video: 'video/*',
+};
+
+const MAX_SIZE_MB: Record<string, number> = {
+  image: 5,
+  audio: 50,
+  video: 50,
+};
 
 export default function VerifyPage() {
   const { t } = useLanguage();
   const [mode, setMode] = useState<Mode>('text');
   const [text, setText] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
+  const [mediaUrl, setMediaUrl] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const [county, setCounty] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<VerifyResponse | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isMediaMode = mode !== 'text';
+
+  const resetMedia = useCallback(() => {
+    setFile(null);
+    setMediaUrl('');
+  }, []);
+
+  function switchMode(m: Mode) {
+    setMode(m);
+    setResult(null);
+    setError(null);
+    resetMedia();
+    setText('');
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped) validateAndSetFile(dropped);
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+  }
+
+  function validateAndSetFile(f: File) {
+    const maxBytes = (MAX_SIZE_MB[mode] || 50) * 1024 * 1024;
+    if (f.size > maxBytes) {
+      setError(`File too large (${(f.size / 1024 / 1024).toFixed(1)} MB). Max ${MAX_SIZE_MB[mode] || 50} MB.`);
+      return;
+    }
+    setError(null);
+    setFile(f);
+    setMediaUrl('');
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -33,8 +101,9 @@ export default function VerifyPage() {
       const trimmed = text.trim();
       if (!trimmed) { setError('Please enter some text to verify.'); return; }
       if (trimmed.length > 5000) { setError('Text is too long (max 5000 characters).'); return; }
-    } else {
-      if (!imageUrl.trim()) { setError('Please enter an image URL.'); return; }
+    } else if (!file && !mediaUrl.trim()) {
+      setError(`Please upload a ${mode} file or enter a URL.`);
+      return;
     }
 
     setLoading(true);
@@ -46,10 +115,13 @@ export default function VerifyPage() {
           county: county.trim() || undefined,
         });
         setResult(res);
+      } else if (file) {
+        const res = await verifyApi.verifyMediaUpload(file, 'public-verify', county.trim() || undefined);
+        setResult(res);
       } else {
         const res = await verifyApi.verifyMedia({
-          media_url: imageUrl.trim(),
-          media_type: 'image',
+          media_url: mediaUrl.trim(),
+          media_type: mode,
           sender_id: 'public-verify',
           county: county.trim() || undefined,
         });
@@ -69,23 +141,24 @@ export default function VerifyPage() {
           Verify before you share
         </h1>
         <p className="text-slate-600 mb-6">
-          Check text or images for harmful or misleading content. Results include messages in English, Swahili, and Sheng.
+          Check text, images, audio, or video for harmful or misleading content.
+          Results include messages in English, Swahili, and Sheng.
         </p>
 
         {/* Mode tabs */}
         <div className="flex gap-1 p-1 bg-slate-100 rounded-lg mb-6 w-fit">
-          {(['text', 'image'] as Mode[]).map((m) => (
+          {(['text', 'image', 'audio', 'video'] as Mode[]).map((m) => (
             <button
               key={m}
               type="button"
-              onClick={() => { setMode(m); setResult(null); setError(null); }}
+              onClick={() => switchMode(m)}
               className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                 mode === m
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              {m === 'text' ? 'Text' : 'Image'}
+              {MODE_LABELS[m]}
             </button>
           ))}
         </div>
@@ -109,24 +182,89 @@ export default function VerifyPage() {
               <p className="mt-1 text-xs text-slate-500">{text.length} / 5000</p>
             </div>
           ) : (
-            <div>
-              <label htmlFor="imageUrl" className="block text-sm font-medium text-slate-700 mb-1">
-                Image URL
-              </label>
+            <div className="space-y-3">
+              {/* Drop zone */}
+              <div
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onClick={() => fileInputRef.current?.click()}
+                className={`relative cursor-pointer rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
+                  dragActive
+                    ? 'border-primary-400 bg-primary-50'
+                    : file
+                    ? 'border-green-400 bg-green-50'
+                    : 'border-slate-300 bg-slate-50 hover:border-primary-300 hover:bg-primary-50/50'
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ACCEPT_MAP[mode]}
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) validateAndSetFile(f);
+                  }}
+                  disabled={loading}
+                />
+                {file ? (
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-green-800">
+                      {file.name}
+                    </p>
+                    <p className="text-xs text-green-600">
+                      {(file.size / 1024 / 1024).toFixed(2)} MB &middot;{' '}
+                      <button
+                        type="button"
+                        className="underline hover:text-red-600"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setFile(null);
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-3xl text-slate-400">
+                      {mode === 'image' ? '🖼️' : mode === 'audio' ? '🎵' : '🎬'}
+                    </div>
+                    <p className="text-sm text-slate-600">
+                      Drag and drop a {mode} file here, or click to browse
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      Max {MAX_SIZE_MB[mode]} MB
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* URL fallback */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-200" />
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="bg-white px-2 text-slate-400">or paste a URL</span>
+                </div>
+              </div>
               <input
-                id="imageUrl"
                 type="url"
-                className="w-full rounded-lg border border-slate-300 p-3 text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                placeholder="https://example.com/image.jpg"
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                disabled={loading}
+                className="w-full rounded-lg border border-slate-300 p-3 text-slate-900 placeholder-slate-500 focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                placeholder={`https://example.com/${mode === 'image' ? 'photo.jpg' : mode === 'audio' ? 'recording.mp3' : 'clip.mp4'}`}
+                value={mediaUrl}
+                onChange={(e) => {
+                  setMediaUrl(e.target.value);
+                  if (e.target.value) setFile(null);
+                }}
+                disabled={loading || !!file}
               />
-              <p className="mt-1 text-xs text-slate-500">
-                Direct link to an image (JPEG, PNG, WebP). Max 5 MB.
-              </p>
             </div>
           )}
+
           <div>
             <label htmlFor="county" className="block text-sm font-medium text-slate-700 mb-1">
               {t.countyOptional}
@@ -141,12 +279,17 @@ export default function VerifyPage() {
               disabled={loading}
             />
           </div>
+
           <button
             type="submit"
             disabled={loading}
             className="w-full rounded-lg bg-primary-600 px-4 py-3 font-medium text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {loading ? t.verifyChecking : mode === 'text' ? t.verifyButton : 'Verify image'}
+            {loading
+              ? t.verifyChecking
+              : mode === 'text'
+              ? t.verifyButton
+              : `Verify ${mode}`}
           </button>
         </form>
 

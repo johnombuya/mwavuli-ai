@@ -7,6 +7,17 @@
 
 ---
 
+## Current implementation status (handoff note)
+
+When continuing on another machine: clone the repo, install backend deps (`pip install -r requirements.txt`), run migrations 001–005 on Supabase (or configure Firebase), set `backend/.env` (e.g. `DB_PROVIDER=supabase`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`; optionally `AUTH_DISABLED=true`, `LLM_PROVIDER`, `OLLAMA_*`). For full media verification, install Tesseract and FFmpeg (see backend README). Frontend: `npm install`, set `frontend/.env.local` (`NEXT_PUBLIC_BACKEND_URL`, optional `NEXT_PUBLIC_API_KEY`). Run backend: `uvicorn app.main:app --reload`; frontend: `npm run dev`.
+
+- **Database:** Supabase (PostgreSQL) is the default (`DB_PROVIDER=supabase`); Firebase is still supported. Migrations live in `backend/migrations/` (001–005; includes `media_hashes` for media dedup).
+- **Media verification:** Full pipeline: images (Tesseract OCR → text ensemble, then Gemini/Ollama Vision), audio (Whisper → text ensemble), video (FFmpeg keyframes + audio). Upload via `POST /api/v1/verify/media/upload`; WhatsApp webhook handles attached media (`NumMedia`, `MediaUrl0`).
+- **Auth:** Optional API keys (`API_KEYS`, `API_KEY_ROLES`); `AUTH_DISABLED=true` bypasses in development.
+- **Dashboard:** Briefing Room (executive summary, Kenya map, top threats) and Analyst View (charts). Verify page: text + image/audio/video (file upload and URL).
+
+---
+
 ## 1. MVP Definition and Objectives
 
 **Project name:** Project Mwavuli (niru_mwavuli)

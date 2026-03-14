@@ -3,6 +3,7 @@ export type UiLang = 'en' | 'sw' | 'sheng';
 type TranslationKey =
   | 'dashboardTitle'
   | 'dashboardSubtitle'
+  | 'navVerify'
   | 'riskDistribution'
   | 'topKeywords'
   | 'toxicityTrends'
@@ -31,6 +32,7 @@ export const translations: TranslationMap = {
     dashboardTitle: 'Mwavuli Intelligence Dashboard',
     dashboardSubtitle:
       'Monitor harmful content, misinformation, and coordinated narratives across Kenyan online spaces in near real-time.',
+    navVerify: 'Verify',
     riskDistribution: 'Risk distribution',
     topKeywords: 'Top keywords',
     toxicityTrends: 'Toxicity trends',
@@ -54,6 +56,7 @@ export const translations: TranslationMap = {
     dashboardTitle: 'Dashibodi ya Akili ya Mwavuli',
     dashboardSubtitle:
       'Fuatilia maudhui hatarishi, habari za kupotosha, na hoja zinazoratibiwa katika majukwaa ya mtandaoni nchini Kenya karibu na wakati halisi.',
+    navVerify: 'Hakiki',
     riskDistribution: 'Usambazaji wa hatari',
     topKeywords: 'Maneno muhimu yanayotumika sana',
     toxicityTrends: 'Mwenendo wa ukatili wa lugha',
@@ -77,6 +80,7 @@ export const translations: TranslationMap = {
     dashboardTitle: 'Mwavuli Intelligence Dashboard',
     dashboardSubtitle:
       'Cheki content mbaya, fake news, na campaigns za coordinated kwa mtandao wa Kenya in real-time.',
+    navVerify: 'Verify',
     riskDistribution: 'Viwango vya risk',
     topKeywords: 'Maneno zenye zinarudi sana',
     toxicityTrends: 'Toxicity imekuwa aje',

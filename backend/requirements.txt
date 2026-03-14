@@ -47,6 +47,11 @@ accelerate>=1.1.0
 # Embeddings (optional — needed for semantic coordination detection)
 sentence-transformers>=2.2.0
 
+# Media analysis (optional — image OCR, audio transcription)
+pytesseract>=0.3.10
+Pillow>=10.0.0
+openai-whisper>=20231117
+
 # SMS intake (optional — Africa's Talking)
 africastalking>=1.2.5
 

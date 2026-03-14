@@ -243,6 +243,18 @@ export const verificationApi = {
     const response = await api.post('/v1/verify/media', data);
     return response.data;
   },
+
+  verifyMediaUpload: async (file: File, senderId: string, county?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('sender_id', senderId);
+    if (county) formData.append('county', county);
+    const response = await api.post('/v1/verify/media/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    });
+    return response.data;
+  },
 };
 
 // Backward-compat alias used by verify page

@@ -43,10 +43,11 @@ Twilio will send a GET request to validate the URL; the backend responds with `2
 
 ## 4. Flow summary
 
-- User sends a WhatsApp message to your Twilio number.
-- Twilio POSTs to `/api/v1/webhooks/twilio` with `Body`, `From`, `To`, etc.
-- Backend runs the same analyzer as `POST /api/v1/verify/text` (lexicon, Detoxify, Gemini).
-- Report is saved to Firestore (same collection as API verification).
+- User sends a WhatsApp message (and optionally media) to your Twilio number.
+- Twilio POSTs to `/api/v1/webhooks/twilio` with `Body`, `From`, `To`, and, when present, `NumMedia`, `MediaUrl0`, `MediaContentType0`.
+- **Text:** Backend runs the same analyzer as `POST /api/v1/verify/text` (lexicon, Detoxify, Gemini/Ollama).
+- **Media:** If the user attached an image, audio, or video, the backend fetches it from `MediaUrl0`, runs it through the same pipeline as `POST /api/v1/verify/media` (image: OCR + Vision; audio: Whisper; video: keyframes + audio), and merges the result with the text analysis. The **higher** risk level is returned.
+- Reports are saved to the configured database (Supabase or Firestore).
 - User receives a WhatsApp reply: English message + prebunking tip; for HIGH/MEDIUM risk, Swahili is appended.
 
 ## 5. Behind a reverse proxy

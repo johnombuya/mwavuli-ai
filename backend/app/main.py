@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, status, Query, Request, Header
+from fastapi import FastAPI, HTTPException, status, Query, Request, Header, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, JSONResponse, Response, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -166,7 +166,11 @@ _AUTH_DISABLED = os.getenv("AUTH_DISABLED", "false").lower() == "true"
 _API_KEYS_RAW = os.getenv("API_KEYS", "")
 _API_KEYS = {k.strip() for k in _API_KEYS_RAW.split(",") if k.strip()} if _API_KEYS_RAW else set()
 
-_PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc", "/api/v1/health", "/api/v1/health/data-integrity"}
+_PUBLIC_PATHS = {
+    "/", "/health", "/docs", "/openapi.json", "/redoc",
+    "/api/v1/health", "/api/v1/health/data-integrity",
+    "/api/v1/webhooks/twilio", "/api/v1/webhooks/africastalking",
+}
 
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -520,78 +524,132 @@ async def verify_media(request: VerifyMediaRequest):
     if is_rate_limited(sender_hash):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
-    if request.media_type == "image":
-        from models.media_analyzer import analyze_image
-        try:
-            result = await analyze_image(request.media_url)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Image analysis failed: {e}")
-
-        report_data = {
-            "text": f"[IMAGE] {request.media_url}",
-            "risk_level": result.risk_level,
-            "language": "media",
-            "county": request.county or "unknown",
-            "sender_id": request.sender_id,
-            "scores": {},
-            "explanation": result.explanation,
-            "media_type": "image",
-            "media_url": request.media_url,
-            "detected_text_summary": result.detected_text_summary,
-        }
-        report_id = save_report(report_data)
-
-        risk_messages = {
-            "HIGH": {
-                "english": f"Warning: This image has been assessed as HIGH risk. {result.explanation}",
-                "swahili": f"Onyo: Picha hii imetathminiwa kuwa hatari ya JUU. {result.explanation}",
-                "sheng": f"Caution: Hii picha imeflagiwa HIGH risk. {result.explanation}",
-            },
-            "MEDIUM": {
-                "english": f"Caution: This image requires attention. {result.explanation}",
-                "swahili": f"Tahadhari: Picha hii inahitaji umakini. {result.explanation}",
-                "sheng": f"Kaa chonjo: Hii picha inahitaji kuchunguzwa. {result.explanation}",
-            },
-        }
-        msgs = risk_messages.get(result.risk_level, {
-            "english": f"This image appears to be low risk. {result.explanation}",
-            "swahili": f"Picha hii inaonekana kuwa na hatari ndogo. {result.explanation}",
-            "sheng": f"Hii picha inakaa sawa. {result.explanation}",
-        })
-
-        return VerifyResponse(
-            risk_level=result.risk_level,
-            messages=TranslatedMessages(**msgs),
-            report_id=report_id,
-            prebunking_tip="Always verify images before sharing. Manipulated images spread fast during election periods.",
-            scores={},
-            matched_keyword=None,
-            explanation=result.explanation,
+    from models.media_analyzer import analyze_media as _analyze_media
+    try:
+        result = await _analyze_media(
+            media_url=request.media_url,
+            media_type=request.media_type,
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Media analysis failed: {e}")
 
-    # Video / audio placeholder
     report_data = {
-        "text": f"[MEDIA: {request.media_type}] {request.media_url}",
-        "risk_level": "MEDIUM",
+        "text": f"[{request.media_type.upper()}] {request.media_url}",
+        "risk_level": result.risk_level,
         "language": "media",
         "county": request.county or "unknown",
         "sender_id": request.sender_id,
         "scores": {},
+        "explanation": result.explanation,
         "media_type": request.media_type,
+        "media_url": request.media_url,
+        "detected_text_summary": result.detected_text_summary,
     }
     report_id = save_report(report_data)
 
+    type_label = request.media_type.title()
+    risk_messages = {
+        "HIGH": {
+            "english": f"Warning: This {type_label} has been assessed as HIGH risk. {result.explanation}",
+            "swahili": f"Onyo: {type_label} hii imetathminiwa kuwa hatari ya JUU. {result.explanation}",
+            "sheng": f"Caution: Hii {type_label} imeflagiwa HIGH risk. {result.explanation}",
+        },
+        "MEDIUM": {
+            "english": f"Caution: This {type_label} requires attention. {result.explanation}",
+            "swahili": f"Tahadhari: {type_label} hii inahitaji umakini. {result.explanation}",
+            "sheng": f"Kaa chonjo: Hii {type_label} inahitaji kuchunguzwa. {result.explanation}",
+        },
+    }
+    msgs = risk_messages.get(result.risk_level, {
+        "english": f"This {type_label} appears to be low risk. {result.explanation}",
+        "swahili": f"{type_label} hii inaonekana kuwa na hatari ndogo. {result.explanation}",
+        "sheng": f"Hii {type_label} inakaa sawa. {result.explanation}",
+    })
+
     return VerifyResponse(
-        risk_level="MEDIUM",
-        messages=TranslatedMessages(
-            english=f"{request.media_type.title()} verification is not yet supported. This content has been logged for manual review.",
-            swahili=f"Uthibitishaji wa {request.media_type} bado haujapatikana. Maudhui haya yamehifadhiwa kwa ukaguzi.",
-            sheng=f"{request.media_type.title()} verification haijafika bado. Imelogishwa for manual check.",
-        ),
+        risk_level=result.risk_level,
+        messages=TranslatedMessages(**msgs),
         report_id=report_id,
-        prebunking_tip="For official election results, always visit iebc.or.ke",
+        prebunking_tip="Always verify media before sharing. Manipulated content spreads fast during election periods.",
         scores={},
         matched_keyword=None,
+        explanation=result.explanation,
+    )
+
+
+@app.post("/api/v1/verify/media/upload", response_model=VerifyResponse, tags=["Verification"])
+async def verify_media_upload(
+    file: UploadFile = File(..., description="Media file to analyze (image, audio, or video)"),
+    sender_id: str = Form(..., description="Sender identifier"),
+    county: Optional[str] = Form(None, description="Kenyan county for regional context"),
+):
+    """
+    Verify uploaded media files (images, audio, video) for harmful content.
+
+    Accepts multipart/form-data with a file upload. Supports drag-and-drop
+    from the frontend verify page.
+    """
+    from utils.rate_limit import is_rate_limited
+    import hashlib as _hl
+    sender_hash = _hl.sha256(sender_id.encode()).hexdigest()[:16]
+    if is_rate_limited(sender_hash):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+    file_bytes = await file.read()
+    content_type = file.content_type or "application/octet-stream"
+
+    from models.media_analyzer import analyze_media as _analyze_media, _detect_media_type
+    detected_type = _detect_media_type(content_type)
+
+    try:
+        result = await _analyze_media(
+            media_bytes=file_bytes,
+            media_type=detected_type,
+            content_type=content_type,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Media analysis failed: {e}")
+
+    report_data = {
+        "text": f"[{detected_type.upper()} UPLOAD] {file.filename or 'unnamed'}",
+        "risk_level": result.risk_level,
+        "language": "media",
+        "county": county or "unknown",
+        "sender_id": sender_id,
+        "scores": {},
+        "explanation": result.explanation,
+        "media_type": detected_type,
+        "detected_text_summary": result.detected_text_summary,
+    }
+    report_id = save_report(report_data)
+
+    type_label = detected_type.title()
+    risk_messages = {
+        "HIGH": {
+            "english": f"Warning: This {type_label} has been assessed as HIGH risk. {result.explanation}",
+            "swahili": f"Onyo: {type_label} hii imetathminiwa kuwa hatari ya JUU. {result.explanation}",
+            "sheng": f"Caution: Hii {type_label} imeflagiwa HIGH risk. {result.explanation}",
+        },
+        "MEDIUM": {
+            "english": f"Caution: This {type_label} requires attention. {result.explanation}",
+            "swahili": f"Tahadhari: {type_label} hii inahitaji umakini. {result.explanation}",
+            "sheng": f"Kaa chonjo: Hii {type_label} inahitaji kuchunguzwa. {result.explanation}",
+        },
+    }
+    msgs = risk_messages.get(result.risk_level, {
+        "english": f"This {type_label} appears to be low risk. {result.explanation}",
+        "swahili": f"{type_label} hii inaonekana kuwa na hatari ndogo. {result.explanation}",
+        "sheng": f"Hii {type_label} inakaa sawa. {result.explanation}",
+    })
+
+    return VerifyResponse(
+        risk_level=result.risk_level,
+        messages=TranslatedMessages(**msgs),
+        report_id=report_id,
+        prebunking_tip="Always verify media before sharing. Manipulated content spreads fast.",
+        scores={},
+        matched_keyword=None,
+        explanation=result.explanation,
     )
 
 
@@ -1500,12 +1558,19 @@ async def twilio_webhook_post(
     body = (params.get("Body") or "").strip()
     from_number = (params.get("From") or "").strip()
 
-    if not body:
-        # Could reply "Send a message to verify" if Twilio is configured
-        return PlainTextResponse("", status_code=200)
-
     if not from_number.startswith("whatsapp:"):
         from_number = f"whatsapp:{from_number}" if from_number.startswith("+") else f"whatsapp:+{from_number}"
+
+    # Check for attached media (images, audio, video)
+    num_media = int(params.get("NumMedia", 0) or 0)
+    media_url = (params.get("MediaUrl0") or "").strip() if num_media > 0 else ""
+    media_content_type = (params.get("MediaContentType0") or "").strip() if num_media > 0 else ""
+
+    has_text = bool(body)
+    has_media = bool(media_url)
+
+    if not has_text and not has_media:
+        return PlainTextResponse("", status_code=200)
 
     if analyzer is None:
         if is_twilio_configured():
@@ -1515,40 +1580,80 @@ async def twilio_webhook_post(
             )
         return PlainTextResponse("", status_code=200)
 
-    try:
-        result = await analyzer.analyze(body)
-    except Exception as e:
-        print(f"Twilio webhook analyze error: {e}")
-        if is_twilio_configured():
-            send_whatsapp_message(
-                from_number,
-                "We couldn't analyze that message. Please try again or send a shorter text.",
+    text_risk = "LOW"
+    text_reply = ""
+    media_risk = "LOW"
+    media_reply = ""
+
+    # Analyze text if present
+    if has_text:
+        try:
+            result = await analyzer.analyze(body)
+            text_risk = result.risk_level
+            text_reply = result.messages["english"]
+            if result.prebunking_tip:
+                text_reply += "\n\n" + result.prebunking_tip
+            report_data = {
+                "text": body,
+                "risk_level": result.risk_level,
+                "language": "auto-detect",
+                "county": "unknown",
+                "sender_id": from_number,
+                "scores": result.scores,
+            }
+            if result.matched_keyword:
+                report_data["matched_keyword"] = result.matched_keyword
+            if result.gemini_context_flag:
+                report_data["gemini_context_flag"] = True
+            save_report(report_data)
+        except Exception as e:
+            print(f"Twilio webhook text analyze error: {e}")
+            text_reply = "We couldn't analyze the text."
+
+    # Analyze media if present
+    if has_media:
+        try:
+            from models.media_analyzer import analyze_media as _analyze_media, _detect_media_type
+            detected_type = _detect_media_type(media_content_type)
+            media_result = await _analyze_media(
+                media_url=media_url,
+                media_type=detected_type,
+                content_type=media_content_type,
             )
-        return PlainTextResponse("", status_code=200)
+            media_risk = media_result.risk_level
+            media_reply = f"[{detected_type.upper()}] {media_result.explanation}"
+            report_data = {
+                "text": f"[MEDIA: {detected_type}] {media_url}",
+                "risk_level": media_result.risk_level,
+                "language": "media",
+                "county": "unknown",
+                "sender_id": from_number,
+                "scores": {},
+                "media_type": detected_type,
+                "media_url": media_url,
+            }
+            save_report(report_data)
+        except Exception as e:
+            print(f"Twilio webhook media analyze error: {e}")
+            media_reply = "We couldn't analyze the attached media."
 
-    # Save report (sender_id = From for anonymized hashing)
-    report_data = {
-        "text": body,
-        "risk_level": result.risk_level,
-        "language": "auto-detect",
-        "county": "unknown",
-        "sender_id": from_number,
-        "scores": result.scores,
-    }
-    if result.matched_keyword:
-        report_data["matched_keyword"] = result.matched_keyword
-    if result.gemini_context_flag:
-        report_data["gemini_context_flag"] = True
-    save_report(report_data)
+    # Build combined reply: take the higher risk level
+    risk_order = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
+    overall_risk = text_risk if risk_order.get(text_risk, 0) >= risk_order.get(media_risk, 0) else media_risk
 
-    # Build reply: main message + prebunking tip
-    reply = result.messages["english"]
-    if result.prebunking_tip:
-        reply += "\n\n" + result.prebunking_tip
+    reply_parts = []
+    if text_reply:
+        reply_parts.append(text_reply)
+    if media_reply:
+        reply_parts.append(media_reply)
+    reply = "\n\n".join(reply_parts) if reply_parts else "Content analyzed."
 
-    # For HIGH/MEDIUM, append Swahili so users can share with others
-    if result.risk_level in ("HIGH", "MEDIUM"):
-        reply += "\n\n--- Swahili ---\n" + result.messages["swahili"]
+    if overall_risk in ("HIGH", "MEDIUM") and has_text:
+        try:
+            result_obj = await analyzer.analyze(body)
+            reply += "\n\n--- Swahili ---\n" + result_obj.messages.get("swahili", "")
+        except Exception:
+            pass
 
     if is_twilio_configured():
         ok, err = send_whatsapp_message(from_number, reply)

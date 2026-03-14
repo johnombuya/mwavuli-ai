@@ -16,7 +16,7 @@ This document provides comprehensive guidance on using the Mwavuli Analytics API
 
 ## Overview
 
-The Mwavuli Analytics API provides 9 endpoints for analyzing content verification reports stored in Firestore. These endpoints enable:
+The Mwavuli Analytics API provides endpoints for analyzing content verification reports. **Data source:** Analytics read from `report_aggregates` and `reports`. When `DB_PROVIDER=supabase` this is Supabase/PostgreSQL; when `firebase`, Firestore. These endpoints enable:
 
 - **Pattern Discovery**: Identify trends and anomalies in harmful content
 - **Geographic Analysis**: Understand regional risk patterns

@@ -4,11 +4,13 @@ FastAPI backend for the Mwavuli content verification and analytics platform. Han
 
 ## Features
 
-- **Text verification** (`POST /api/v1/verify/text`): Lexicon checks, Detoxify toxicity, Gemini context and translation (English, Swahili, Sheng)
-- **Media verification** (`POST /api/v1/verify/media`): Placeholder or optional real analysis (e.g. Gemini Vision)
-- **Analytics API**: Summary, by-county, by-date, recent reports (paginated)
-- **Data export**: CSV/JSON export for external tools
-- **Firebase Firestore**: Anonymized report logging
+- **Text verification** (`POST /api/v1/verify/text`): Lexicon, Detoxify, Kenyan classifier, Gemini/Ollama context and translation; auto sector/county detection
+- **Media verification** (`POST /api/v1/verify/media`, `POST /api/v1/verify/media/upload`): Images (OCR + Vision), audio (Whisper), video (FFmpeg keyframes + audio); hash dedup via `media_hashes` table
+- **Analytics API**: Summary, risk distribution, keyword/token trends, county analysis, executive summary, topic clusters, lexicon suggestions
+- **Database**: Supabase (PostgreSQL) or Firebase; reports and daily aggregates; run migrations 001–005
+- **API security**: Optional API keys; `AUTH_DISABLED=true` in development to bypass
+- **Webhooks**: Twilio (WhatsApp text + media), Africa's Talking SMS
+- **Data export**: CSV/JSON/STIX
 
 ## Firestore usage and optimization contract
 
@@ -49,9 +51,9 @@ To keep Firestore usage predictable and affordable as Mwavuli grows, the backend
 ## Prerequisites
 
 - Python 3.10+
-- Firebase project with Firestore enabled
+- **Database**: Supabase project (recommended) or Firebase with Firestore enabled
 - Google Gemini API key
-- (Optional) Twilio account for WhatsApp integration
+- (Optional) Twilio account for WhatsApp; Tesseract and FFmpeg for full media verification
 
 ## Setup
 
@@ -85,7 +87,35 @@ pip install -r requirements.txt
 
 > **Note:** The first time Detoxify runs, it downloads the multilingual model (~500MB) on the first API call.
 
-### 3. Environment variables
+#### System dependencies (optional — for media verification)
+
+- **Tesseract OCR** — used for extracting text from images before calling the Vision LLM.
+  - **Windows**: `choco install tesseract` or download from [UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki). Make sure the folder containing `tesseract.exe` is added to your `PATH`, then restart your terminal.
+  - **Ubuntu/Debian**: `sudo apt update && sudo apt install -y tesseract-ocr`
+  - **macOS** (Homebrew): `brew install tesseract`
+- **FFmpeg** — used for extracting keyframes and audio from video files.
+  - **Windows**: `choco install ffmpeg` or download from [ffmpeg.org](https://ffmpeg.org/download.html) and add the `bin` folder to your `PATH`.
+  - **Ubuntu/Debian**: `sudo apt update && sudo apt install -y ffmpeg`
+  - **macOS** (Homebrew): `brew install ffmpeg`
+
+In containerised deployments (e.g. Docker), you can install both with:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+```
+
+If Tesseract is missing, the backend will log a non-fatal warning and skip OCR for images; if FFmpeg is missing, video keyframe/audio extraction will be skipped.
+
+### 3. Database and migrations
+
+- Set `DB_PROVIDER=supabase` (or `firebase`) in `.env`.
+- **Supabase**: Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Run all migrations in order in the Supabase SQL Editor: `migrations/001_initial_schema.sql` through `005_add_media_hashes.sql`. The `media_hashes` table is required for media dedup; without it the backend still runs but cache lookups will fail (non-fatal).
+- **Firebase**: Set `FIREBASE_SERVICE_ACCOUNT_PATH` and optionally `FIREBASE_DATABASE_ID`. No SQL migrations; schema is document-based.
+
+### 4. Environment variables
 
 Copy the example env file and set your values:
 
@@ -99,12 +129,24 @@ Edit `.env` and fill in the following:
 
 | Variable | Required | Default / Example | Description |
 |----------|----------|-------------------|-------------|
-| `FIREBASE_SERVICE_ACCOUNT_PATH` | Yes | `./firebase-service-account.json` | Path to your Firebase service account JSON (relative to `backend/` or absolute). |
-| `FIREBASE_DATABASE_ID` | No | *(empty)* or `mwavuli-nira-db` | Firestore database ID; leave empty to use the default database. |
+| `DB_PROVIDER` | No | `supabase` | `supabase` or `firebase`. |
+| `SUPABASE_URL` | When Supabase | *(empty)* | Supabase project URL (Settings → API). |
+| `SUPABASE_SERVICE_ROLE_KEY` | When Supabase | *(empty)* | Supabase service_role key (Settings → API). |
+| `FIREBASE_SERVICE_ACCOUNT_PATH` | When Firebase | `./firebase-service-account.json` | Path to Firebase service account JSON. |
+| `FIREBASE_DATABASE_ID` | No | *(empty)* or `mwavuli-nira-db` | Firestore database ID; leave empty for default. |
 | `GEMINI_API_KEY` | Yes | `your_gemini_api_key_here` | Google Gemini API key ([Google AI Studio](https://makersuite.google.com/app/apikey)). |
-| `TWILIO_ACCOUNT_SID` | No | *(empty)* | Twilio Account SID (starts with `AC`). Required for WhatsApp replies. See [Twilio WhatsApp setup](docs/TWILIO_WHATSAPP.md). |
-| `TWILIO_AUTH_TOKEN` | No | *(empty)* | Twilio Auth Token (from same Console page as Account SID). |
-| `TWILIO_WHATSAPP_FROM` | No | `whatsapp:+14155238886` | Your Twilio WhatsApp number with `whatsapp:` prefix (sandbox or production). |
+| `LLM_PROVIDER` | No | `auto` | `gemini`, `ollama`, or `auto` (try Gemini, fallback Ollama). |
+| `OLLAMA_BASE_URL` | When using Ollama | `http://localhost:11434` | Ollama server URL. |
+| `OLLAMA_MODEL` | No | `llama3` | Ollama model for text. |
+| `OLLAMA_VISION_MODEL` | No | `llava` | Ollama vision model for images. |
+| `AUTH_DISABLED` | No | `false` | Set `true` in development to skip API key checks. |
+| `API_KEYS` | No | *(empty)* | Comma-separated API keys; empty = all requests allowed. |
+| `API_KEY_ROLES` | No | *(empty)* | Optional key:role pairs (e.g. `key1:admin,key2:analyst`). |
+| `TWILIO_ACCOUNT_SID` | No | *(empty)* | Twilio Account SID. See [Twilio WhatsApp](docs/TWILIO_WHATSAPP.md). |
+| `TWILIO_AUTH_TOKEN` | No | *(empty)* | Twilio Auth Token. |
+| `TWILIO_WHATSAPP_FROM` | No | `whatsapp:+14155238886` | Twilio WhatsApp number with `whatsapp:` prefix. |
+| `HF_MODEL_REPO` | No | *(empty)* | HuggingFace repo for Kenyan classifier (e.g. `user/mwavuli-kenyan-classifier`). |
+| `HF_TOKEN` | No | *(empty)* | HuggingFace token for private repos. |
 
 **Web ingestion / auto-reports (optional)**
 
@@ -127,32 +169,30 @@ Edit `.env` and fill in the following:
 | `ALERT_WEBHOOK_URL` | No | *(empty)* | If set, `run_alerts.py` POSTs a JSON payload here when high-risk counts exceed the threshold. |
 | `ALERT_HIGH_RISK_THRESHOLD` | No | `10` | Number of HIGH-risk reports in the last 24h that will trigger an alert. |
 
-Example `backend/.env` for local development:
+Example `backend/.env` for local development (Supabase):
 
 ```env
-FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json
-FIREBASE_DATABASE_ID=
+DB_PROVIDER=supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 GEMINI_API_KEY=your_gemini_api_key_here
+AUTH_DISABLED=true
+API_KEYS=
+
+LLM_PROVIDER=auto
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_VISION_MODEL=llava
 
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 
 INGESTION_ENABLED=false
-INGESTION_RSS_FEEDS=
-INGESTION_SCRAPE_DOMAINS=
-INGESTION_SCRAPE_SEED_URLS=
-INGESTION_RATE_LIMIT_REQ_PER_MIN=30
-INGESTION_USER_AGENT=MwavuliElectionMonitor/1.0
-INGESTION_ELECTION_KEYWORDS=
-INGESTION_JOB_ID=
-INGESTION_ADMIN_ENABLED=false
-
 ALERT_WEBHOOK_URL=
 ALERT_HIGH_RISK_THRESHOLD=10
 ```
 
-Place your Firebase service account JSON in the `backend/` folder (or any path you configure in `FIREBASE_SERVICE_ACCOUNT_PATH`) and ensure it is listed in `.gitignore`.
+See `.env.example` for all options. When using Firebase, set `DB_PROVIDER=firebase`, `FIREBASE_SERVICE_ACCOUNT_PATH`, and optionally `FIREBASE_DATABASE_ID`. Do not commit `.env` or service account JSON to git.
 
 ## Commands
 
@@ -339,28 +379,40 @@ For deduplication, the pipeline queries reports by `source_url` and optionally b
 ```
 backend/
 ├── app/
-│   ├── main.py          # FastAPI app, routes, lifespan
-│   └── ingestion/       # Web ingestion pipeline
-│       ├── feed_fetcher.py  # RSS/Atom fetcher
-│       ├── scraper.py       # Allowlisted scraper (robots.txt, rate limit, circuit breaker)
-│       ├── pipeline.py     # fetch -> dedupe -> filter -> verify -> save
-│       └── utils.py        # URL normalisation
+│   ├── main.py             # FastAPI app, routes, webhooks, lifespan
+│   └── ingestion/           # Web ingestion pipeline
 ├── models/
-│   └── text_analyzer.py  # MwavuliAnalyzer (lexicon, Detoxify, Gemini)
+│   ├── text_analyzer.py    # MwavuliAnalyzer (lexicon, Detoxify, Gemini/Ollama)
+│   └── media_analyzer.py   # Image/audio/video (OCR, Vision, Whisper, FFmpeg)
 ├── utils/
-│   ├── db.py            # Firestore save_report, get_report, report_exists_by_source_url, ingestion_audit
-│   ├── ingestion_config.py  # Ingestion env config
-│   ├── analytics.py     # Analytics aggregation
-│   ├── export.py        # CSV/JSON export
-│   └── lexicon.py       # Kenya-specific keywords
+│   ├── db.py               # save_report, get_repository
+│   ├── db_base.py          # ReportRepository interface
+│   ├── db_supabase.py      # Supabase implementation
+│   ├── db_firebase.py      # Firebase implementation (optional)
+│   ├── db_helpers.py       # enrich_report, aggregate helpers
+│   ├── analytics.py        # Analytics, executive summary
+│   ├── export.py           # CSV/JSON/STIX export
+│   └── lexicon.py          # Kenya-specific keywords
+├── migrations/             # SQL migrations (Supabase; run 001–005)
+│   ├── 001_initial_schema.sql
+│   ├── 002_add_embeddings.sql
+│   ├── 003_add_clusters.sql
+│   ├── 004_add_gemini_labels.sql
+│   └── 005_add_media_hashes.sql
 ├── scripts/
-│   ├── run_ingestion.py     # Run one ingestion cycle (for cron)
+│   ├── run_ingestion.py    # One ingestion cycle (cron)
 │   ├── seed_dummy_reports.py
+│   ├── backfill_aggregates.py   # Recompute report_aggregates
+│   ├── backfill_sector_county.py # Backfill sector/county (Gemini/Ollama)
+│   ├── backfill_embeddings.py   # Backfill embeddings for reports
+│   ├── cluster_reports.py       # Topic clustering (HDBSCAN)
 │   ├── test_api.sh
 │   └── test_analytics.sh
 ├── docs/
 │   ├── ANALYTICS.md
-│   └── LOOKER_STUDIO_SETUP.md
+│   ├── TWILIO_WHATSAPP.md
+│   ├── LOOKER_STUDIO_SETUP.md
+│   └── FIRESTORE_INDEXES.md
 ├── requirements.txt
 ├── .env.example
 ├── Dockerfile
@@ -371,20 +423,31 @@ backend/
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Health check |
+| GET | `/health`, `/api/v1/health` | Health check |
 | POST | `/api/v1/verify/text` | Verify text content |
-| POST | `/api/v1/verify/media` | Verify media (placeholder or real) |
-| GET | `/api/v1/analytics/summary` | Summary stats (risk, date range) |
-| GET | `/api/v1/analytics/by-county` | Counts by county |
-| GET | `/api/v1/analytics/by-date` | Counts by date |
+| POST | `/api/v1/verify/media` | Verify media by URL (image/audio/video) |
+| POST | `/api/v1/verify/media/upload` | Verify uploaded file (multipart) |
+| GET | `/api/v1/analytics/summary` | Summary stats |
+| GET | `/api/v1/analytics/risk-distribution` | Risk breakdown |
+| GET | `/api/v1/analytics/keyword-trends` | Top keywords |
+| GET | `/api/v1/analytics/executive-summary` | AI-generated brief |
 | GET | `/api/v1/analytics/recent` | Recent reports (paginated) |
-| GET | `/api/v1/export/csv` | Export reports as CSV |
-| GET | `/api/v1/export/json` | Export reports as JSON |
+| GET | `/api/v1/export/reports` | Export reports (CSV/JSON) |
+| POST | `/api/v1/webhooks/twilio` | Twilio WhatsApp (text + media) |
 
-Full request/response details: http://localhost:8000/docs
+Protected routes require `X-API-Key` when `API_KEYS` is set; use `AUTH_DISABLED=true` in development. Full details: http://localhost:8000/docs
+
+## Scripts (optional)
+
+- **backfill_aggregates.py** — Recompute `report_aggregates` from `reports` (run after bulk import or schema fix).
+- **backfill_sector_county.py** — Backfill `sector` and `county` on existing reports using local matching and/or Gemini/Ollama (`--engine ollama`, `--skip-gemini`, etc.).
+- **backfill_embeddings.py** — Compute and store embeddings for reports (for semantic coordination).
+- **cluster_reports.py** — Run HDBSCAN clustering and write to `report_clusters` (for topic-cluster analytics).
 
 ## Troubleshooting
 
 - **Detoxify model error:** Clear cache: `Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\*"` (Windows) or `rm -rf ~/.cache/torch/hub/*` (Linux/macOS), then restart.
+- **Supabase "table not found":** Run migrations 001–005 in the Supabase SQL Editor. If `media_hashes` is missing, media dedup is skipped (non-fatal).
 - **Firebase 404:** Ensure Firestore is enabled and `FIREBASE_DATABASE_ID` matches your database (or leave empty for default).
 - **Gemini errors:** Check `GEMINI_API_KEY` and quota at [Google AI Studio](https://makersuite.google.com/app/apikey).
+- **401 on API calls:** Set `AUTH_DISABLED=true` in dev or send a valid `X-API-Key` from `API_KEYS`.

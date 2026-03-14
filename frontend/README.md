@@ -4,12 +4,12 @@ Next.js analytics dashboard for the Mwavuli content verification platform. Displ
 
 ## Features
 
+- **Mwavuli Intelligence Dashboard**: Briefing Room (executive summary, Kenya map, top threats) and Analyst View (charts)
+- **Verify page** (`/verify`): Text paste; image/audio/video upload (drag-and-drop or URL)
 - **Summary cards**: Total reports, risk distribution (HIGH/MEDIUM/LOW), date range
-- **Charts**: Risk distribution, keyword trends, toxicity trends, hourly patterns
-- **County heatmap**: Geographic view of risk levels by Kenyan county
-- **Date range filter**: Filter analytics by start and end date
-- **Auto-refresh**: Configurable polling (e.g. 2-minute) for live updates
-- **Responsive layout**: Works on desktop and mobile
+- **Charts**: Risk distribution, keyword trends, toxicity trends, hourly patterns, county heatmap, detection-risk matrix
+- **Auto-refresh**: Configurable polling for live updates
+- **Responsive layout**: Desktop and mobile
 
 ## Prerequisites
 
@@ -27,20 +27,22 @@ npm install
 
 ### 2. Environment variables
 
-Create a `.env.local` file in the `frontend` folder (optional; defaults work for local dev):
+Copy `frontend/.env.example` to `.env.local` and set:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `BACKEND_URL` | Backend API base URL (used for `/api/*` rewrites) | `http://localhost:8000` |
+| `NEXT_PUBLIC_BACKEND_URL` | Backend API base URL (for rewrites and API client) | `http://localhost:8000` |
+| `NEXT_PUBLIC_API_KEY` | Optional API key for backend auth (when API_KEYS is set) | *(empty)* |
 
 Example:
 
 ```bash
-# .env.local
-BACKEND_URL=http://localhost:8000
+cp .env.example .env.local
+# Edit: NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+# Optional: NEXT_PUBLIC_API_KEY=your_key (if backend uses API_KEYS)
 ```
 
-For production or a different host, set `BACKEND_URL` to your backend URL (e.g. `https://api.yourdomain.com`).
+For production, set `NEXT_PUBLIC_BACKEND_URL` to your public API URL.
 
 ## Commands
 
@@ -79,10 +81,10 @@ Runs Next.js ESLint.
 
 ```bash
 docker build -t mwavuli-frontend .
-docker run -p 3000:3000 -e BACKEND_URL=http://host.docker.internal:8000 mwavuli-frontend
+docker run -p 3000:3000 -e NEXT_PUBLIC_BACKEND_URL=http://host.docker.internal:8000 mwavuli-frontend
 ```
 
-Adjust `BACKEND_URL` if the backend runs elsewhere (e.g. another container or host).
+Adjust `NEXT_PUBLIC_BACKEND_URL` if the backend runs elsewhere.
 
 ## Project structure
 
@@ -90,41 +92,34 @@ Adjust `BACKEND_URL` if the backend runs elsewhere (e.g. another container or ho
 frontend/
 ├── src/
 │   ├── app/
-│   │   ├── globals.css
+│   │   ├── page.tsx           # Dashboard (Briefing Room / Analyst View)
+│   │   ├── verify/page.tsx   # Verify text + image/audio/video
 │   │   ├── layout.tsx
-│   │   └── page.tsx
+│   │   └── globals.css
 │   ├── components/
+│   │   ├── dashboard/         # KenyaHotspotMap, ExecutiveSummary, charts, etc.
 │   │   ├── charts/
-│   │   │   ├── HourlyPatternsChart.tsx
-│   │   │   ├── KeywordTrendsChart.tsx
-│   │   │   ├── RiskDistributionChart.tsx
-│   │   │   └── ToxicityTrendsChart.tsx
-│   │   ├── dashboard/
-│   │   │   ├── CountyHeatmap.tsx
-│   │   │   └── SummaryCards.tsx
 │   │   └── ui/
-│   │       ├── DateRangePicker.tsx
-│   │       └── LoadingSpinner.tsx
-│   └── types/
-│       └── api.ts
-├── next.config.js      # API rewrites → BACKEND_URL
+│   ├── lib/
+│   │   ├── api.ts             # API client (verify, analytics)
+│   │   └── translations.ts   # EN/SW/Sheng
+│   └── contexts/
+├── .env.example               # NEXT_PUBLIC_BACKEND_URL, NEXT_PUBLIC_API_KEY
+├── next.config.js             # API rewrites → NEXT_PUBLIC_BACKEND_URL
 ├── package.json
-├── tailwind.config.js
-├── tsconfig.json
 └── README.md
 ```
 
 ## API usage
 
-The frontend calls the backend via Next.js rewrites:
+The frontend calls the backend via Next.js rewrites and the API client in `src/lib/api.ts`:
 
-- Browser requests: `GET /api/v1/analytics/summary` (etc.)
-- Next.js rewrites to: `{BACKEND_URL}/api/v1/analytics/summary`
-
-So the app only needs to target `/api/...`; the backend URL is configured in `BACKEND_URL` and `next.config.js`.
+- Requests to `/api/*` are rewritten to `{NEXT_PUBLIC_BACKEND_URL}/api/*`
+- When `NEXT_PUBLIC_API_KEY` is set, the client sends `X-API-Key` for protected routes
 
 ## Troubleshooting
 
-- **Blank or no data:** Ensure the backend is running at `BACKEND_URL` and that Firestore has report data (or run some verify requests first).
-- **CORS errors:** Backend CORS is set to allow the frontend origin; if you use a different port or host, update backend CORS in `app/main.py`.
+- **Blank or no data:** Ensure the backend is running at `NEXT_PUBLIC_BACKEND_URL` and that the database (Supabase/Firebase) has report data, or run some verify requests first.
+- **401 on API calls:** Set `AUTH_DISABLED=true` in the backend or add `NEXT_PUBLIC_API_KEY` to match a key in the backend `API_KEYS`.
+- **CORS errors:** Backend CORS uses `FRONTEND_URL`; ensure it matches your frontend origin.
 - **Build errors:** Run `npm run lint` and fix any TypeScript/ESLint issues; ensure Node 20+.

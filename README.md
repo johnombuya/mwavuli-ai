@@ -11,40 +11,43 @@ A full-stack content verification system designed for detecting harmful informat
        │
 ┌──────▼─────────────────────────────────────┐
 │  Next.js Frontend (Port 3000)              │
-│  - Analytics Dashboard                     │
-│  - Real-time Updates (2-min polling)      │
-│  - API Rewrites → Backend                  │
+│  - Mwavuli Intelligence Dashboard          │
+│  - Briefing Room / Analyst View            │
+│  - Verify page (text + image/audio/video)  │
+│  - API rewrites → Backend                   │
 └──────┬─────────────────────────────────────┘
        │
 ┌──────▼─────────────────────────────────────┐
-│  FastAPI Backend (Port 8000)               │
-│  - Content Verification                    │
-│  - Analytics API                           │
-│  - Data Export                             │
+│  FastAPI Backend (Port 8000)                │
+│  - Text & media verification               │
+│  - Analytics API & export                  │
+│  - API key auth (optional; bypass in dev)  │
 └──────┬─────────────────────────────────────┘
        │
-┌──────▼──────┐
-│  Firestore  │
-└─────────────┘
+┌──────▼─────────────────────────────────────┐
+│  Supabase (PostgreSQL) or Firebase         │
+│  - reports, report_aggregates              │
+│  - media_hashes (dedup cache)              │
+└────────────────────────────────────────────┘
 ```
 
 ## Features
 
 ### Backend
-- **Lexicon-Based Detection**: Immediate flagging of high-risk Kenyan political keywords (e.g., "madoadoa", "kwekwe")
-- **AI Toxicity Analysis**: Multilingual toxicity detection using Detoxify
-- **Context-Aware Analysis**: Google Gemini integration for detecting subtle political incitement
-- **Multi-Language Support**: Responses in English, Swahili, and Sheng
-- **Firebase Integration**: Anonymized logging of reports for pattern analysis
-- **Analytics API**: Comprehensive analytics endpoints for data analysis
-- **Data Export**: CSV/JSON export for external tools
+- **Text verification**: Lexicon, Detoxify, Kenyan classifier, Gemini/Ollama context check; auto sector/county detection
+- **Media verification**: Images (OCR → text ensemble, Gemini/Ollama Vision), audio (Whisper → text ensemble), video (keyframes + audio via FFmpeg); hash-based dedup cache (`media_hashes` table)
+- **Multi-language responses**: English, Swahili, Sheng
+- **Database**: Supabase (PostgreSQL) or Firebase; reports and daily aggregates; run migrations in `backend/migrations/` (001–005)
+- **Analytics API**: Summary, risk distribution, keyword/token trends, county analysis, executive summary, topic clusters, lexicon suggestions
+- **API security**: Optional API keys; set `AUTH_DISABLED=true` in development to bypass
+- **Webhooks**: Twilio (WhatsApp text + media), Africa's Talking SMS
+- **Data export**: CSV/JSON/STIX
 
 ### Frontend
-- **Real-time Dashboard**: Live analytics with 2-minute auto-refresh
-- **Interactive Charts**: Risk distribution, keyword trends, toxicity trends, hourly patterns
-- **County Analysis**: Geographic heatmap of risk levels by county
-- **Date Range Filtering**: Filter analytics by date range
-- **Responsive Design**: Works on desktop and mobile devices
+- **Mwavuli Intelligence Dashboard**: Briefing Room (executive summary, Kenya map, top threats) and Analyst View (charts)
+- **Verify page**: Text paste; image/audio/video upload (drag-and-drop or URL)
+- **Charts**: Risk distribution, keyword trends, toxicity trends, hourly patterns, county heatmap, detection-risk matrix
+- **Responsive layout**: Desktop and mobile
 
 ## Quick Start with Docker Compose
 
@@ -75,8 +78,9 @@ The application will be available at:
 
 - Python 3.10+ (tested with Python 3.11+)
 - Node.js 20+ and npm
-- Firebase project with Firestore enabled
+- **Database**: Supabase project (recommended) or Firebase with Firestore
 - Google Gemini API key
+- Optional (for full media verification): Tesseract OCR, FFmpeg — see [backend README](backend/README.md#system-dependencies-optional--for-media-verification)
 
 ### Backend Setup
 
@@ -101,24 +105,15 @@ The application will be available at:
    pip install -r requirements.txt
    ```
 
-4. **Set up Firebase**:
-   - Go to [Firebase Console](https://console.firebase.google.com/)
-   - Create a new project or select existing project
-   - Enable **Firestore Database**
-   - Create a Service Account and download the JSON key file
-   - Use `backend/firebase-service-account.example.json` as a template for the required fields
-   - For local development, save it as `firebase-service-account.json` in the `backend/` directory and ensure it is listed in `.gitignore`
-   - For staging/production, do **not** commit the JSON file; store it via your hosting provider’s secret manager or mount it as a file, and set `FIREBASE_SERVICE_ACCOUNT_PATH` in `backend/.env` to that path (e.g. `/secrets/firebase-service-account.json`)
+4. **Database**: Use **Supabase** (default) or Firebase.
+   - **Supabase**: Create a project at [supabase.com](https://supabase.com). In **Settings → API** copy the project URL and service_role key. Run all migrations in order in the SQL Editor: `backend/migrations/001_initial_schema.sql` through `005_add_media_hashes.sql`.
+   - **Firebase**: Enable Firestore, create a service account, download the JSON key. See `backend/.env.example` for `FIREBASE_SERVICE_ACCOUNT_PATH` and `FIREBASE_DATABASE_ID`.
 
 5. **Configure environment variables**:
    ```bash
-   # Copy template
    cp .env.example .env
-   
-   # Edit .env and fill in:
-   FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json
-   FIREBASE_DATABASE_ID=mwavuli-nira-db  # Leave empty for default
-   GEMINI_API_KEY=your_gemini_api_key_here
+   # Edit .env: DB_PROVIDER=supabase (or firebase), SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+   # GEMINI_API_KEY; optionally API_KEYS, AUTH_DISABLED=true for dev.
    ```
 
 6. **Run backend**:
@@ -140,12 +135,9 @@ The application will be available at:
 
 3. **Configure environment**:
    ```bash
-   # Copy template
-   cp .env.local.example .env.local
-   
-   # Edit .env.local:
-   BACKEND_URL=http://localhost:8000
-   NEXT_PUBLIC_API_URL=http://localhost:8000
+   cp .env.example .env.local
+   # Set NEXT_PUBLIC_BACKEND_URL=http://localhost:8000 (or your backend URL)
+   # Optional: NEXT_PUBLIC_API_KEY for backend API key auth
    ```
 
 4. **Run frontend**:
@@ -158,44 +150,44 @@ The application will be available at:
 ```
 niru_mwavuli/
 ├── backend/                    # FastAPI backend
-│   ├── app/
-│   │   ├── main.py            # FastAPI application
-│   │   └── __init__.py
+│   ├── app/main.py            # FastAPI app, routes, webhooks
 │   ├── models/
-│   │   └── text_analyzer.py   # MwavuliAnalyzer class
+│   │   ├── text_analyzer.py   # MwavuliAnalyzer (lexicon, Detoxify, Gemini/Ollama)
+│   │   └── media_analyzer.py  # Image/audio/video verification (OCR, Vision, Whisper, FFmpeg)
 │   ├── utils/
-│   │   ├── db.py              # Firebase Firestore utility
+│   │   ├── db.py              # save_report, get_repository
+│   │   ├── db_supabase.py     # Supabase implementation
+│   │   ├── db_firebase.py     # Firebase implementation (optional)
+│   │   ├── analytics.py       # Analytics and executive summary
 │   │   ├── lexicon.py         # Kenya-specific keywords
-│   │   ├── analytics.py       # Analytics functions
-│   │   └── export.py          # Data export utilities
+│   │   └── export.py          # CSV/JSON/STIX export
+│   ├── migrations/            # SQL migrations (run 001–005 on Supabase)
 │   ├── docs/                  # Backend documentation
-│   ├── scripts/               # Test scripts
-│   ├── requirements.txt       # Python dependencies
-│   ├── Dockerfile            # Backend Docker image
-│   └── .env                  # Backend environment variables
+│   ├── scripts/               # Seed, backfill, ingestion, tests
+│   ├── requirements.txt
+│   ├── .env.example
+│   └── README.md
 │
 ├── frontend/                   # Next.js frontend
-│   ├── src/
-│   │   ├── app/              # Next.js App Router
-│   │   │   ├── layout.tsx    # Root layout with React Query
-│   │   │   ├── page.tsx      # Dashboard home
-│   │   │   └── globals.css   # Global styles
-│   │   ├── components/       # React components
-│   │   │   ├── dashboard/    # Dashboard components
-│   │   │   ├── charts/       # Chart components
-│   │   │   └── ui/           # UI components
-│   │   ├── lib/              # Utilities
-│   │   │   ├── api.ts        # API client
-│   │   │   └── utils.ts      # Helper functions
-│   │   └── types/            # TypeScript types
-│   │       └── api.ts
-│   ├── package.json          # Node dependencies
-│   ├── next.config.js        # Next.js config with rewrites
-│   ├── Dockerfile           # Frontend Docker image
-│   └── .env.local           # Frontend environment variables
+│   ├── src/app/
+│   │   ├── page.tsx           # Dashboard (Briefing Room / Analyst View)
+│   │   ├── verify/page.tsx    # Verify text + image/audio/video
+│   │   ├── layout.tsx
+│   │   └── globals.css
+│   ├── src/components/
+│   │   ├── dashboard/         # Charts, Kenya map, executive summary, etc.
+│   │   ├── charts/
+│   │   └── ui/
+│   ├── src/lib/
+│   │   ├── api.ts             # API client (verify, analytics)
+│   │   └── translations.ts   # EN/SW/Sheng
+│   ├── .env.example           # NEXT_PUBLIC_BACKEND_URL, NEXT_PUBLIC_API_KEY
+│   ├── next.config.js         # API rewrites
+│   └── README.md
 │
-├── docker-compose.yml        # Docker Compose configuration
-└── README.md                 # This file
+├── docker-compose.yml
+├── TECHNICAL_ROADMAP.md
+└── README.md
 ```
 
 ## API Endpoints
@@ -203,7 +195,8 @@ niru_mwavuli/
 ### Verification
 
 - `POST /api/v1/verify/text` - Verify text content
-- `POST /api/v1/verify/media` - Verify media content (image via Gemini Vision; video/audio placeholder)
+- `POST /api/v1/verify/media` - Verify media by URL (image/audio/video)
+- `POST /api/v1/verify/media/upload` - Verify uploaded file (multipart; image/audio/video)
 
 ### Reports & Appeals
 
@@ -312,8 +305,8 @@ FRONTEND_URL=https://your-frontend-domain.com
 
 **Frontend** (`frontend/.env.local`):
 ```env
-BACKEND_URL=http://backend:8000  # Docker service name
-NEXT_PUBLIC_API_URL=https://api.your-domain.com  # Public API URL
+NEXT_PUBLIC_BACKEND_URL=http://backend:8000  # or https://api.your-domain.com
+NEXT_PUBLIC_API_KEY=  # optional; match backend API_KEYS
 ```
 
 ## Troubleshooting
@@ -334,9 +327,9 @@ rm -rf ~/.cache/torch/hub/*
 ### Frontend Issues
 
 **API Connection Error**: 
-- Check `BACKEND_URL` in `frontend/.env.local`
+- Check `NEXT_PUBLIC_BACKEND_URL` in `frontend/.env.local`
 - Verify backend is running on port 8000
-- Check browser console for CORS errors
+- Check browser console for CORS or 401 errors (set `AUTH_DISABLED=true` or `NEXT_PUBLIC_API_KEY` in dev)
 
 **Build Errors**:
 ```bash
@@ -358,6 +351,10 @@ ports:
 **Volume Mount Issues**: Ensure file permissions are correct.
 
 ## Operations / Runbook
+
+### Database migrations (Supabase)
+
+Run migrations in order in the Supabase SQL Editor: `backend/migrations/001_initial_schema.sql` through `005_add_media_hashes.sql`. After schema changes, optionally run `python scripts/backfill_aggregates.py` to recompute daily aggregates, and `python scripts/backfill_sector_county.py` to backfill sector/county on existing reports.
 
 ### Purge expired reports
 
@@ -394,7 +391,7 @@ When active, alert thresholds are halved and the dashboard refreshes every 30 se
 
 ### Media verification
 
-Image verification uses Gemini Vision. Video and audio are placeholders and return a generic MEDIUM-risk response pending future implementation.
+Full pipeline: images (Tesseract OCR → text ensemble, then Gemini/Ollama Vision), audio (Whisper → text ensemble), video (FFmpeg keyframes + audio). Use `POST /api/v1/verify/media/upload` for file uploads; dedup via `media_hashes` table. Install Tesseract and FFmpeg for full support (see [backend README](backend/README.md)).
 
 ### Bias testing
 
@@ -407,18 +404,21 @@ python scripts/bias_test.py
 
 ## Security Notes
 
-- **Never commit** `.env`, `.env.local`, or `firebase-service-account.json` to git
+- **Never commit** `.env`, `.env.local`, `firebase-service-account.json`, or Supabase service role key to git
 - Set `SENDER_HASH_SALT` to a long random string in production
-- Set `API_KEYS` and `API_KEY_ROLES` to restrict API access
+- Set `API_KEYS` and `API_KEY_ROLES` to restrict API access; use `AUTH_DISABLED=true` only in development
 - Configure `FRONTEND_URL` for CORS in production
-- Rotate Firebase and Gemini credentials if accidentally exposed
+- Rotate database and Gemini credentials if accidentally exposed
 - Use environment variables for all sensitive data in production
-- Configure CORS appropriately for production (update `ALLOWED_ORIGINS` in `backend/app/main.py`)
 
 ## Documentation
 
-- [Analytics API Documentation](backend/docs/ANALYTICS.md)
-- [Looker Studio Setup Guide](backend/docs/LOOKER_STUDIO_SETUP.md)
+- [Backend README](backend/README.md) — setup, env vars, migrations, scripts
+- [Analytics API](backend/docs/ANALYTICS.md)
+- [Twilio WhatsApp](backend/docs/TWILIO_WHATSAPP.md) — webhook + media attachments
+- [Looker Studio Setup](backend/docs/LOOKER_STUDIO_SETUP.md)
+- [Firestore Indexes](backend/docs/FIRESTORE_INDEXES.md) (when using Firebase)
+- [Technical Roadmap](TECHNICAL_ROADMAP.md)
 
 ## License
 
