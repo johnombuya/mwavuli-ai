@@ -80,7 +80,9 @@ The application will be available at:
 - Node.js 20+ and npm
 - **Database**: Supabase project (recommended) or Firebase with Firestore
 - Google Gemini API key
-- Optional (for full media verification): Tesseract OCR, FFmpeg — see [backend README](backend/README.md#system-dependencies-optional--for-media-verification)
+- Optional (for local AI and full media verification):
+  - **Ollama** for running a local LLM (and optionally a vision model) — see [backend README](backend/README.md#local-llm-ollama-optional)
+  - **Tesseract OCR** and **FFmpeg** — see [backend README](backend/README.md#system-dependencies-optional--for-media-verification-and-local-ai)
 
 ### Backend Setup
 

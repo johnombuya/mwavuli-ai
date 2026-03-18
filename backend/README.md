@@ -87,7 +87,7 @@ pip install -r requirements.txt
 
 > **Note:** The first time Detoxify runs, it downloads the multilingual model (~500MB) on the first API call.
 
-#### System dependencies (optional — for media verification)
+#### System dependencies (optional — for media verification and local AI)
 
 - **Tesseract OCR** — used for extracting text from images before calling the Vision LLM.
   - **Windows**: `choco install tesseract` or download from [UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki). Make sure the folder containing `tesseract.exe` is added to your `PATH`, then restart your terminal.
@@ -108,6 +108,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ```
 
 If Tesseract is missing, the backend will log a non-fatal warning and skip OCR for images; if FFmpeg is missing, video keyframe/audio extraction will be skipped.
+
+#### Local LLM (Ollama, optional)
+
+To run the context-aware analyzer locally instead of (or in addition to) Google Gemini, you can use [Ollama](https://ollama.com/):
+
+- **Install Ollama (Windows/macOS/Linux)**:
+  - Download from `https://ollama.com/download` and follow the installer.
+  - In a new terminal, verify:
+    ```powershell
+    ollama --version
+    ```
+- **Pull models** (examples):
+  ```powershell
+  ollama pull llama3          # text-only LLM
+  ollama pull llava           # multimodal / vision model (optional)
+  ```
+- **Configure `backend/.env`** (see also `.env.example`):
+  ```env
+  LOCAL_LLM_ENABLED=true
+  OLLAMA_BASE_URL=http://localhost:11434
+  OLLAMA_MODEL=llama3
+  # OLLAMA_VISION_MODEL=llava
+  ```
+
+When `LLM_PROVIDER=auto` (default), the backend will try Gemini first and fall back to Ollama when Gemini is unavailable. Set `LLM_PROVIDER=ollama` to force Ollama-only mode in offline environments.
 
 ### 3. Database and migrations
 
