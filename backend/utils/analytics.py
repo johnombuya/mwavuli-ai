@@ -66,7 +66,7 @@ def get_risk_level_distribution(
     """Get distribution of risk levels over time period (reads from aggregates)."""
     if not start_date or not end_date:
         end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=7)
+        start_date = datetime(2020, 1, 1)  # all-time default
     try:
         distribution: Dict[str, int] = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}
         for agg in _iter_aggregates(start_date, end_date, sector, org_id):
@@ -341,7 +341,7 @@ def get_summary_stats(
     """Get overall statistics summary using daily aggregates."""
     if not start_date or not end_date:
         end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=7)
+        start_date = datetime(2020, 1, 1)  # all-time default
     try:
         total_reports = 0
         risk_dist: Dict[str, int] = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}
@@ -484,7 +484,7 @@ def get_detection_method_risk_matrix(
     """Aggregate counts by detection_method and risk_level using aggregates."""
     if not start_date or not end_date:
         end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=7)
+        start_date = datetime(2020, 1, 1)  # all-time default
     try:
         matrix: Dict[str, Dict[str, int]] = defaultdict(
             lambda: {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0, "total": 0}
@@ -544,7 +544,7 @@ def get_url_mention_risk_stats(
     """Compare risk distributions for reports with/without URLs and mentions (aggregates)."""
     if not start_date or not end_date:
         end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=7)
+        start_date = datetime(2020, 1, 1)  # all-time default
     try:
         def empty_dist() -> Dict[str, int]:
             return {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0, "total": 0}
@@ -644,7 +644,7 @@ def get_status_counts(
     """Count reports by moderation status using daily aggregates."""
     if not start_date or not end_date:
         end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=7)
+        start_date = datetime(2020, 1, 1)  # all-time default
     try:
         counts: Counter = Counter()
         for agg in _iter_aggregates(start_date, end_date, sector, org_id):
